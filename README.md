@@ -1,1 +1,1 @@
-# protect-panel
+# installprotect
