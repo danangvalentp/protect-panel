@@ -173,6 +173,11 @@ inject_guard_into_method() {
         cp "${FILE}.bak_${TIMESTAMP}" "$FILE"
         return 0
     fi
+    if ! grep -q "$METHOD_MARKER" "$FILE"; then
+        echo "❌ Marker $METHOD_MARKER TIDAK ditemukan setelah inject (regex method tidak match) — rollback $FILE"
+        cp "${FILE}.bak_${TIMESTAMP}" "$FILE"
+        return 0
+    fi
     echo "✅ Guard terpasang di $FILE::$METHOD_NAME"
 }
 
@@ -224,30 +229,35 @@ inject_delete_guard_into_method() {
         cp "${FILE}.bak_${TIMESTAMP}" "$FILE"
         return 0
     fi
+    if ! grep -q "$METHOD_MARKER" "$FILE"; then
+        echo "❌ Marker $METHOD_MARKER TIDAK ditemukan (regex method tidak match) — rollback $FILE"
+        cp "${FILE}.bak_${TIMESTAMP}" "$FILE"
+        return 0
+    fi
     echo "✅ Guard delete terpasang di $FILE::$METHOD_NAME"
 }
 
 ADMIN_USER_CTRL="$PANEL_DIR/app/Http/Controllers/Admin/UserController.php"
-inject_guard_into_method "$ADMIN_USER_CTRL" "function[[:space:]]+store[[:space:]]*\\(" "ADMIN_STORE"
-inject_guard_into_method "$ADMIN_USER_CTRL" "function[[:space:]]+update[[:space:]]*\\(" "ADMIN_UPDATE"
-inject_delete_guard_into_method "$ADMIN_USER_CTRL" "function[[:space:]]+(delete|destroy)[[:space:]]*\\(" "ADMIN_DELETE"
+inject_guard_into_method "$ADMIN_USER_CTRL" "function[[:space:]]+store[[:space:]]*[(]" "ADMIN_STORE"
+inject_guard_into_method "$ADMIN_USER_CTRL" "function[[:space:]]+update[[:space:]]*[(]" "ADMIN_UPDATE"
+inject_delete_guard_into_method "$ADMIN_USER_CTRL" "function[[:space:]]+(delete|destroy)[[:space:]]*[(]" "ADMIN_DELETE"
 
 APP_USER_CTRL="$PANEL_DIR/app/Http/Controllers/Api/Application/Users/UserController.php"
-inject_guard_into_method "$APP_USER_CTRL" "function[[:space:]]+store[[:space:]]*\\(" "APP_API_STORE"
-inject_guard_into_method "$APP_USER_CTRL" "function[[:space:]]+update[[:space:]]*\\(" "APP_API_UPDATE"
-inject_delete_guard_into_method "$APP_USER_CTRL" "function[[:space:]]+(delete|destroy)[[:space:]]*\\(" "APP_API_DELETE"
+inject_guard_into_method "$APP_USER_CTRL" "function[[:space:]]+store[[:space:]]*[(]" "APP_API_STORE"
+inject_guard_into_method "$APP_USER_CTRL" "function[[:space:]]+update[[:space:]]*[(]" "APP_API_UPDATE"
+inject_delete_guard_into_method "$APP_USER_CTRL" "function[[:space:]]+(delete|destroy)[[:space:]]*[(]" "APP_API_DELETE"
 
 CLIENT_USER_CTRL="$PANEL_DIR/app/Http/Controllers/Api/Client/Users/UserController.php"
-inject_delete_guard_into_method "$CLIENT_USER_CTRL" "function[[:space:]]+(delete|destroy)[[:space:]]*\\(" "CLIENT_API_DELETE"
+inject_delete_guard_into_method "$CLIENT_USER_CTRL" "function[[:space:]]+(delete|destroy)[[:space:]]*[(]" "CLIENT_API_DELETE"
 
 USER_CREATE_SVC="$PANEL_DIR/app/Services/Users/UserCreationService.php"
-inject_guard_into_method "$USER_CREATE_SVC" "function[[:space:]]+handle[[:space:]]*\\(" "USER_CREATE_SERVICE_HANDLE"
+inject_guard_into_method "$USER_CREATE_SVC" "function[[:space:]]+handle[[:space:]]*[(]" "USER_CREATE_SERVICE_HANDLE"
 
 USER_UPDATE_SVC="$PANEL_DIR/app/Services/Users/UserUpdateService.php"
-inject_guard_into_method "$USER_UPDATE_SVC" "function[[:space:]]+handle[[:space:]]*\\(" "USER_UPDATE_SERVICE_HANDLE"
+inject_guard_into_method "$USER_UPDATE_SVC" "function[[:space:]]+handle[[:space:]]*[(]" "USER_UPDATE_SERVICE_HANDLE"
 
 USER_DELETE_SVC="$PANEL_DIR/app/Services/Users/UserDeletionService.php"
-inject_delete_guard_into_method "$USER_DELETE_SVC" "function[[:space:]]+handle[[:space:]]*\\(" "USER_DELETE_SERVICE_HANDLE"
+inject_delete_guard_into_method "$USER_DELETE_SVC" "function[[:space:]]+handle[[:space:]]*[(]" "USER_DELETE_SERVICE_HANDLE"
 
 USER_MODEL="$PANEL_DIR/app/Models/User.php"
 if [ -f "$USER_MODEL" ]; then
