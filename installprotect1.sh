@@ -63,31 +63,46 @@ class ServerDeletionService
      */
     public function handle(Server $server): void
     {
-        $user = Auth::user();
+        // 🔒 Proteksi: deteksi user dari SEMUA guard (web, api application, api client)
+        // agar delete via Application API (plta) & Client API (pltc) tetap diproteksi.
+        $user = Auth::user()
+            ?? Auth::guard('api')->user()
+            ?? Auth::guard('application')->user()
+            ?? Auth::guard('client')->user()
+            ?? request()?->user();
 
-        // 🔒 Proteksi: hanya Admin ID = 1 boleh menghapus server siapa saja.
-        // Selain itu, user biasa hanya boleh menghapus server MILIKNYA SENDIRI.
-        // Jika tidak ada informasi pemilik dan pengguna bukan admin, tolak.
+        // Deteksi apakah request datang dari API (plta/pltc)
+        $isApiRequest = false;
+        try {
+            $req = request();
+            if ($req) {
+                $path = $req->path();
+                if (str_starts_with($path, 'api/application') || str_starts_with($path, 'api/client')) {
+                    $isApiRequest = true;
+                }
+            }
+        } catch (\Throwable $e) {}
+
         if ($user) {
-            if ($user->id !== 1) {
-                // Coba deteksi owner dengan beberapa fallback yang umum.
+            if ((int) $user->id !== 1) {
                 $ownerId = $server->owner_id
                     ?? $server->user_id
                     ?? ($server->owner?->id ?? null)
                     ?? ($server->user?->id ?? null);
 
                 if ($ownerId === null) {
-                    // Tidak jelas siapa pemiliknya — jangan izinkan pengguna biasa menghapus.
-                    throw new DisplayException('Akses ditolak: informasi pemilik server tidak tersedia.');
+                    throw new DisplayException('Akses ditolak: informasi pemilik server tidak tersedia @ 𝐏𝐑𝐎𝐓𝐄𝐂𝐓 𝐁𝐘 𝐉𝐇𝐎𝐍𝐀𝐋𝐄𝐘 𝐓𝐄𝐂𝐇.');
                 }
 
-                if ($ownerId !== $user->id) {
-                    throw new DisplayException('Akses ditolak: Anda hanya dapat menghapus server milik Anda sendiri @ 𝐏𝐑𝐎𝐓𝐄𝐂𝐓 𝐁𝐘 𝐉𝐇𝐎𝐍𝐀𝐋𝐄𝐘 𝐓𝐄𝐂𝐇.');
+                if ((int) $ownerId !== (int) $user->id) {
+                    throw new DisplayException('Akses ditolak: hanya Admin ID 1 yang dapat menghapus server milik user lain @ 𝐏𝐑𝐎𝐓𝐄𝐂𝐓 𝐁𝐘 𝐉𝐇𝐎𝐍𝐀𝐋𝐄𝐘 𝐓𝐄𝐂𝐇.');
                 }
             }
-            // jika $user->id === 1, lanjutkan (admin super)
+        } elseif ($isApiRequest) {
+            // Request API tanpa user terdeteksi → tolak (mencegah bypass via plta/pltc)
+            throw new DisplayException('Akses ditolak: penghapusan server via API hanya diizinkan untuk Admin ID 1 @ 𝐏𝐑𝐎𝐓𝐄𝐂𝐓 𝐁𝐘 𝐉𝐇𝐎𝐍𝐀𝐋𝐄𝐘 𝐓𝐄𝐂𝐇.');
         }
-        // Jika tidak ada $user (mis. CLI/background job), biarkan proses berjalan.
+        // CLI/background job (tanpa request) tetap diizinkan.
 
         try {
             $this->daemonServerRepository->setServer($server)->delete();
