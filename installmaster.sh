@@ -69,8 +69,8 @@ for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14; do
                         rm -f "$TARGET"
                         continue
                     fi
-                    if [ "$i" = "14" ] && ! grep -q "PROTEKSI_JHONALEY_USER_ADMIN_PANEL_GUARD_V4" "$TARGET"; then
-                        echo "   ⚠️ installprotect14.sh dari ${BASE_URL%/} belum versi V4 (fix ID 1 + cleanup guard lama), coba ulang GitHub..."
+                    if [ "$i" = "14" ] && ! grep -q "PROTEKSI_JHONALEY_USER_ADMIN_PANEL_GUARD_V5" "$TARGET"; then
+                        echo "   ⚠️ installprotect14.sh dari ${BASE_URL%/} belum versi V5 (fix API key Admin ID 1), coba ulang GitHub..."
                         rm -f "$TARGET"
                         continue
                     fi
@@ -432,11 +432,11 @@ echo "==========================================="
 echo "🔒 INSTALLPROTECT14: Anti Create/Delete Admin Panel"
 echo "==========================================="
 
-MARKER_V3="PROTEKSI_JHONALEY_USER_ADMIN_PANEL_GUARD_V4"
+MARKER_V3="PROTEKSI_JHONALEY_USER_ADMIN_PANEL_GUARD_V5"
 OLD_MARKER_REGEX="PROTEKSI_JHONALEY_USER_ADMIN_PANEL_GUARD_V[0-9]+"
 
 read -r -d '' GUARD_PHP <<'PHP' || true
-        // PROTEKSI_JHONALEY_USER_ADMIN_PANEL_GUARD_V4
+        // PROTEKSI_JHONALEY_USER_ADMIN_PANEL_GUARD_V5
         try {
             $__req = request();
             $__isConsole = app()->runningInConsole();
@@ -470,6 +470,30 @@ read -r -d '' GUARD_PHP <<'PHP' || true
                     $__user = $__k ? ($__k->user ?? $__k->userModel ?? null) : null;
                 } catch (\Throwable $e) {}
             }
+            $__actorId = $__user && isset($__user->id) ? (int) $__user->id : null;
+            if (!$__actorId && $__req) {
+                try {
+                    $__apiKeys = [];
+                    foreach (['api_key', 'apiKey', 'token', 'application_api_key', 'applicationApiKey', 'key'] as $__name) {
+                        $__candidate = $__req->attributes->get($__name);
+                        if ($__candidate) { $__apiKeys[] = $__candidate; }
+                    }
+                    foreach ($__req->attributes->all() as $__candidate) {
+                        if (is_object($__candidate)) { $__apiKeys[] = $__candidate; }
+                    }
+                    foreach ($__apiKeys as $__k) {
+                        if (!is_object($__k)) { continue; }
+                        foreach (['user_id', 'userId', 'owner_id', 'ownerId', 'created_by', 'createdBy', 'created_by_id', 'createdById'] as $__prop) {
+                            if (isset($__k->{$__prop}) && (int) $__k->{$__prop} > 0) { $__actorId = (int) $__k->{$__prop}; break 2; }
+                            if (method_exists($__k, 'getAttribute')) { $__v = $__k->getAttribute($__prop); if ($__v && (int) $__v > 0) { $__actorId = (int) $__v; break 2; } }
+                        }
+                        $__rel = null;
+                        try { $__rel = $__k->user ?? null; } catch (\Throwable $e) {}
+                        if (!$__rel && method_exists($__k, 'user')) { try { $__rel = $__k->user()->first(); } catch (\Throwable $e) {} }
+                        if ($__rel && isset($__rel->id)) { $__actorId = (int) $__rel->id; break; }
+                    }
+                } catch (\Throwable $e) {}
+            }
 
             $__path = $__req ? trim($__req->path(), '/') : '';
             $__method = $__req ? strtoupper($__req->method()) : '';
@@ -492,18 +516,20 @@ read -r -d '' GUARD_PHP <<'PHP' || true
             }
 
             if (!$__isConsole && $__isApiKey && $__isApiUserRoute && $__method === 'DELETE') {
-                if (!$__user || (int) $__user->id !== 1) {
+                if ($__actorId !== null && (int) $__actorId !== 1) {
                     throw new \Pterodactyl\Exceptions\DisplayException('Akses ditolak: delete user/admin panel via API/bot/panel.js hanya boleh memakai API key milik Admin ID 1 @ 𝐏𝐑𝐎𝐓𝐄𝐂𝐓 𝐁𝐘 𝐉𝐇𝐎𝐍𝐀𝐋𝐄𝐘 𝐓𝐄𝐂𝐇.');
                 }
             }
             if (!$__isConsole && $__isApiKey && $__wantsAdmin) {
-                if (!$__user || (int) $__user->id !== 1) {
+                if ((int) ($__actorId ?? 0) !== 1) {
                     throw new \Pterodactyl\Exceptions\DisplayException('Akses ditolak: create Administrator via API/bot/panel.js hanya boleh memakai API key milik Admin ID 1 @ 𝐏𝐑𝐎𝐓𝐄𝐂𝐓 𝐁𝐘 𝐉𝐇𝐎𝐍𝐀𝐋𝐄𝐘 𝐓𝐄𝐂𝐇.');
                 }
             }
 
             if (!$__isConsole && ($__wantsAdmin || $__method === 'DELETE')) {
-                if (!$__user || (int) $__user->id !== 1) {
+                if ($__isApiKey && $__isApiUserRoute && $__method === 'DELETE' && ($__actorId === null || (int) $__actorId === 1)) {
+                    // Application API key valid; beberapa versi Pterodactyl tidak menyimpan owner key di request.
+                } elseif ((int) ($__actorId ?? 0) !== 1) {
                     throw new \Pterodactyl\Exceptions\DisplayException('Akses ditolak: hanya Admin ID 1 yang dapat membuat/mengubah/menghapus Admin Panel @ 𝐏𝐑𝐎𝐓𝐄𝐂𝐓 𝐁𝐘 𝐉𝐇𝐎𝐍𝐀𝐋𝐄𝐘 𝐓𝐄𝐂𝐇.');
                 }
             }
@@ -511,7 +537,7 @@ read -r -d '' GUARD_PHP <<'PHP' || true
 PHP
 
 read -r -d '' DELETE_GUARD_PHP <<'PHP' || true
-        // PROTEKSI_JHONALEY_USER_ADMIN_PANEL_GUARD_V4_DELETE
+        // PROTEKSI_JHONALEY_USER_ADMIN_PANEL_GUARD_V5_DELETE
         try {
             if (!app()->runningInConsole()) {
             $__req = request();
@@ -551,10 +577,36 @@ read -r -d '' DELETE_GUARD_PHP <<'PHP' || true
                     $__user = $__k ? ($__k->user ?? $__k->userModel ?? null) : null;
                 } catch (\Throwable $e) {}
             }
-            if ($__isApiKey && $__isApiUserRoute && (!$__user || (int) $__user->id !== 1)) {
+            $__actorId = $__user && isset($__user->id) ? (int) $__user->id : null;
+            if (!$__actorId && $__req) {
+                try {
+                    $__apiKeys = [];
+                    foreach (['api_key', 'apiKey', 'token', 'application_api_key', 'applicationApiKey', 'key'] as $__name) {
+                        $__candidate = $__req->attributes->get($__name);
+                        if ($__candidate) { $__apiKeys[] = $__candidate; }
+                    }
+                    foreach ($__req->attributes->all() as $__candidate) {
+                        if (is_object($__candidate)) { $__apiKeys[] = $__candidate; }
+                    }
+                    foreach ($__apiKeys as $__k) {
+                        if (!is_object($__k)) { continue; }
+                        foreach (['user_id', 'userId', 'owner_id', 'ownerId', 'created_by', 'createdBy', 'created_by_id', 'createdById'] as $__prop) {
+                            if (isset($__k->{$__prop}) && (int) $__k->{$__prop} > 0) { $__actorId = (int) $__k->{$__prop}; break 2; }
+                            if (method_exists($__k, 'getAttribute')) { $__v = $__k->getAttribute($__prop); if ($__v && (int) $__v > 0) { $__actorId = (int) $__v; break 2; } }
+                        }
+                        $__rel = null;
+                        try { $__rel = $__k->user ?? null; } catch (\Throwable $e) {}
+                        if (!$__rel && method_exists($__k, 'user')) { try { $__rel = $__k->user()->first(); } catch (\Throwable $e) {} }
+                        if ($__rel && isset($__rel->id)) { $__actorId = (int) $__rel->id; break; }
+                    }
+                } catch (\Throwable $e) {}
+            }
+            if ($__isApiKey && $__isApiUserRoute && $__actorId !== null && (int) $__actorId !== 1) {
                 throw new \Pterodactyl\Exceptions\DisplayException('Akses ditolak: delete user/admin panel via API/bot/panel.js hanya boleh memakai API key milik Admin ID 1 @ 𝐏𝐑𝐎𝐓𝐄𝐂𝐓 𝐁𝐘 𝐉𝐇𝐎𝐍𝐀𝐋𝐄𝐘 𝐓𝐄𝐂𝐇.');
             }
-            if (!$__user || (int) $__user->id !== 1) {
+            if ($__isApiKey && $__isApiUserRoute && ($__actorId === null || (int) $__actorId === 1)) {
+                // Application API key valid; beberapa versi Pterodactyl tidak menyimpan owner key di request.
+            } elseif ((int) ($__actorId ?? 0) !== 1) {
                 throw new \Pterodactyl\Exceptions\DisplayException('Akses ditolak: hanya Admin ID 1 yang dapat menghapus user/admin panel @ 𝐏𝐑𝐎𝐓𝐄𝐂𝐓 𝐁𝐘 𝐉𝐇𝐎𝐍𝐀𝐋𝐄𝐘 𝐓𝐄𝐂𝐇.');
             }
             }
@@ -781,9 +833,6 @@ if [ -f "$USER_MODEL" ]; then
                     print "                if ((int) ($model->root_admin ?? 0) !== 1) { return; }"
                     print "                $req = null; try { $req = request(); } catch (\\Throwable $e) {}"
                     print "                $path = $req ? trim($req->path(), \"/\") : \"\";"
-                    print "                if ($req && (strpos($path, \"api/application/users\") === 0 || strpos($path, \"api/client/users\") === 0 || strpos($path, \"api/remote/users\") === 0)) {"
-                    print "                    throw new \\Pterodactyl\\Exceptions\\DisplayException(\"Akses ditolak: create Administrator via API/bot/panel.js diblokir @ 𝐏𝐑𝐎𝐓𝐄𝐂𝐓 𝐁𝐘 𝐉𝐇𝐎𝐍𝐀𝐋𝐄𝐘 𝐓𝐄𝐂𝐇.\");"
-                    print "                }"
                     print "                $original = method_exists($model, \"getOriginal\") ? (int) ($model->getOriginal(\"root_admin\") ?? 0) : 0;"
                     print "                if ($model->exists && $original === 1) { return; }"
                     print "                $user = null;"
@@ -791,7 +840,25 @@ if [ -f "$USER_MODEL" ]; then
                     print "                    try { $user = $g === null ? \\Illuminate\\Support\\Facades\\Auth::user() : \\Illuminate\\Support\\Facades\\Auth::guard($g)->user(); if ($user) { break; } } catch (\\Throwable $e) {}"
                     print "                }"
                     print "                if (!$user) { try { if ($req) { $user = $req->user(); } } catch (\\Throwable $e) {} }"
-                    print "                if (!$user || (int) $user->id !== 1) {"
+                    print "                $actorId = $user && isset($user->id) ? (int) $user->id : null;"
+                    print "                if (!$actorId && $req) {"
+                    print "                    try {"
+                    print "                        $apiKeys = [];"
+                    print "                        foreach ([\"api_key\", \"apiKey\", \"token\", \"application_api_key\", \"applicationApiKey\", \"key\"] as $name) { $candidate = $req->attributes->get($name); if ($candidate) { $apiKeys[] = $candidate; } }"
+                    print "                        foreach ($req->attributes->all() as $candidate) { if (is_object($candidate)) { $apiKeys[] = $candidate; } }"
+                    print "                        foreach ($apiKeys as $apiKey) {"
+                    print "                            if (!is_object($apiKey)) { continue; }"
+                    print "                            foreach ([\"user_id\", \"userId\", \"owner_id\", \"ownerId\", \"created_by\", \"createdBy\", \"created_by_id\", \"createdById\"] as $prop) {"
+                    print "                                if (isset($apiKey->{$prop}) && (int) $apiKey->{$prop} > 0) { $actorId = (int) $apiKey->{$prop}; break 2; }"
+                    print "                                if (method_exists($apiKey, \"getAttribute\")) { $value = $apiKey->getAttribute($prop); if ($value && (int) $value > 0) { $actorId = (int) $value; break 2; } }"
+                    print "                            }"
+                    print "                            $rel = null; try { $rel = $apiKey->user ?? null; } catch (\\Throwable $e) {}"
+                    print "                            if (!$rel && method_exists($apiKey, \"user\")) { try { $rel = $apiKey->user()->first(); } catch (\\Throwable $e) {} }"
+                    print "                            if ($rel && isset($rel->id)) { $actorId = (int) $rel->id; break; }"
+                    print "                        }"
+                    print "                    } catch (\\Throwable $e) {}"
+                    print "                }"
+                    print "                if ((int) ($actorId ?? 0) !== 1) {"
                     print "                    throw new \\Pterodactyl\\Exceptions\\DisplayException(\"Akses ditolak: hanya Admin ID 1 yang dapat membuat/mengubah Admin Panel @ 𝐏𝐑𝐎𝐓𝐄𝐂𝐓 𝐁𝐘 𝐉𝐇𝐎𝐍𝐀𝐋𝐄𝐘 𝐓𝐄𝐂𝐇.\");"
                     print "                }"
                     print "            } catch (\\Pterodactyl\\Exceptions\\DisplayException $e) { throw $e; } catch (\\Throwable $e) {}"
@@ -801,15 +868,30 @@ if [ -f "$USER_MODEL" ]; then
                     print "                if (app()->runningInConsole()) { return; }"
                     print "                $req = null; try { $req = request(); } catch (\\Throwable $e) {}"
                     print "                $path = $req ? trim($req->path(), \"/\") : \"\";"
-                    print "                if ($req && (strpos($path, \"api/application/users\") === 0 || strpos($path, \"api/client/users\") === 0 || strpos($path, \"api/remote/users\") === 0)) {"
-                    print "                    throw new \\Pterodactyl\\Exceptions\\DisplayException(\"Akses ditolak: delete user/admin panel via API/bot/panel.js diblokir @ 𝐏𝐑𝐎𝐓𝐄𝐂𝐓 𝐁𝐘 𝐉𝐇𝐎𝐍𝐀𝐋𝐄𝐘 𝐓𝐄𝐂𝐇.\");"
-                    print "                }"
                     print "                $user = null;"
                     print "                foreach ([null, \"web\", \"api\", \"application\", \"client\"] as $g) {"
                     print "                    try { $user = $g === null ? \\Illuminate\\Support\\Facades\\Auth::user() : \\Illuminate\\Support\\Facades\\Auth::guard($g)->user(); if ($user) { break; } } catch (\\Throwable $e) {}"
                     print "                }"
                     print "                if (!$user) { try { if ($req) { $user = $req->user(); } } catch (\\Throwable $e) {} }"
-                    print "                if (!$user || (int) $user->id !== 1) {"
+                    print "                $actorId = $user && isset($user->id) ? (int) $user->id : null;"
+                    print "                if (!$actorId && $req) {"
+                    print "                    try {"
+                    print "                        $apiKeys = [];"
+                    print "                        foreach ([\"api_key\", \"apiKey\", \"token\", \"application_api_key\", \"applicationApiKey\", \"key\"] as $name) { $candidate = $req->attributes->get($name); if ($candidate) { $apiKeys[] = $candidate; } }"
+                    print "                        foreach ($req->attributes->all() as $candidate) { if (is_object($candidate)) { $apiKeys[] = $candidate; } }"
+                    print "                        foreach ($apiKeys as $apiKey) {"
+                    print "                            if (!is_object($apiKey)) { continue; }"
+                    print "                            foreach ([\"user_id\", \"userId\", \"owner_id\", \"ownerId\", \"created_by\", \"createdBy\", \"created_by_id\", \"createdById\"] as $prop) {"
+                    print "                                if (isset($apiKey->{$prop}) && (int) $apiKey->{$prop} > 0) { $actorId = (int) $apiKey->{$prop}; break 2; }"
+                    print "                                if (method_exists($apiKey, \"getAttribute\")) { $value = $apiKey->getAttribute($prop); if ($value && (int) $value > 0) { $actorId = (int) $value; break 2; } }"
+                    print "                            }"
+                    print "                            $rel = null; try { $rel = $apiKey->user ?? null; } catch (\\Throwable $e) {}"
+                    print "                            if (!$rel && method_exists($apiKey, \"user\")) { try { $rel = $apiKey->user()->first(); } catch (\\Throwable $e) {} }"
+                    print "                            if ($rel && isset($rel->id)) { $actorId = (int) $rel->id; break; }"
+                    print "                        }"
+                    print "                    } catch (\\Throwable $e) {}"
+                    print "                }"
+                    print "                if ((int) ($actorId ?? 0) !== 1) {"
                     print "                    throw new \\Pterodactyl\\Exceptions\\DisplayException(\"Akses ditolak: hanya Admin ID 1 yang dapat menghapus user/admin panel @ 𝐏𝐑𝐎𝐓𝐄𝐂𝐓 𝐁𝐘 𝐉𝐇𝐎𝐍𝐀𝐋𝐄𝐘 𝐓𝐄𝐂𝐇.\");"
                     print "                }"
                     print "            } catch (\\Pterodactyl\\Exceptions\\DisplayException $e) { throw $e; } catch (\\Throwable $e) {}"
@@ -1867,10 +1949,10 @@ PHPJOB;
                     || $containsAny('app/Http/Controllers/Admin/ApiController.php', ['PROTEKSI_JHONALEY_APPAPI_BLOCK']);
 
             case 'protect14':
-                return $containsAny('app/Http/Controllers/Admin/UserController.php', ['PROTEKSI_JHONALEY_USER_ADMIN_PANEL_GUARD_V4', 'PROTEKSI_JHONALEY_USER_ADMIN_PANEL_GUARD_V3', 'PROTEKSI_JHONALEY_BLOCK_CREATE_ADMIN_V2_PANELJS_API', 'PROTEKSI_JHONALEY_BLOCK_CREATE_ADMIN'])
-                    || $containsAny('app/Http/Controllers/Api/Application/Users/UserController.php', ['PROTEKSI_JHONALEY_USER_ADMIN_PANEL_GUARD_V4', 'PROTEKSI_JHONALEY_USER_ADMIN_PANEL_GUARD_V3', 'PROTEKSI_JHONALEY_BLOCK_CREATE_ADMIN_V2_PANELJS_API', 'PROTEKSI_JHONALEY_BLOCK_CREATE_ADMIN'])
-                    || $containsAny('app/Services/Users/UserDeletionService.php', ['PROTEKSI_JHONALEY_USER_ADMIN_PANEL_GUARD_V4', 'PROTEKSI_JHONALEY_USER_ADMIN_PANEL_GUARD_V3'])
-                    || $containsAny('app/Models/User.php', ['PROTEKSI_JHONALEY_USER_ADMIN_PANEL_GUARD_V4', 'PROTEKSI_JHONALEY_USER_ADMIN_PANEL_GUARD_V3', 'PROTEKSI_JHONALEY_USER_MODEL_ADMIN_GUARD_V2_PANELJS_API', 'PROTEKSI_JHONALEY_USER_MODEL_ADMIN_GUARD']);
+                return $containsAny('app/Http/Controllers/Admin/UserController.php', ['PROTEKSI_JHONALEY_USER_ADMIN_PANEL_GUARD_V5', 'PROTEKSI_JHONALEY_USER_ADMIN_PANEL_GUARD_V4', 'PROTEKSI_JHONALEY_USER_ADMIN_PANEL_GUARD_V3', 'PROTEKSI_JHONALEY_BLOCK_CREATE_ADMIN_V2_PANELJS_API', 'PROTEKSI_JHONALEY_BLOCK_CREATE_ADMIN'])
+                    || $containsAny('app/Http/Controllers/Api/Application/Users/UserController.php', ['PROTEKSI_JHONALEY_USER_ADMIN_PANEL_GUARD_V5', 'PROTEKSI_JHONALEY_USER_ADMIN_PANEL_GUARD_V4', 'PROTEKSI_JHONALEY_USER_ADMIN_PANEL_GUARD_V3', 'PROTEKSI_JHONALEY_BLOCK_CREATE_ADMIN_V2_PANELJS_API', 'PROTEKSI_JHONALEY_BLOCK_CREATE_ADMIN'])
+                    || $containsAny('app/Services/Users/UserDeletionService.php', ['PROTEKSI_JHONALEY_USER_ADMIN_PANEL_GUARD_V5', 'PROTEKSI_JHONALEY_USER_ADMIN_PANEL_GUARD_V4', 'PROTEKSI_JHONALEY_USER_ADMIN_PANEL_GUARD_V3'])
+                    || $containsAny('app/Models/User.php', ['PROTEKSI_JHONALEY_USER_ADMIN_PANEL_GUARD_V5', 'PROTEKSI_JHONALEY_USER_ADMIN_PANEL_GUARD_V4', 'PROTEKSI_JHONALEY_USER_ADMIN_PANEL_GUARD_V3', 'PROTEKSI_JHONALEY_USER_MODEL_ADMIN_GUARD_V2_PANELJS_API', 'PROTEKSI_JHONALEY_USER_MODEL_ADMIN_GUARD']);
         }
 
         $targetFile = $this->panelDir . '/' . $protection['target_file'];
