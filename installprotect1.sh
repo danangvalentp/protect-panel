@@ -97,7 +97,13 @@ class ServerDeletionService
 
     private function assertDeletionAllowed(Server $server): void
     {
-        // 🔒 Mode ketat: delete server normal, force/offline, PLTA, dan PLTC hanya boleh oleh User ID 1.
+        // 🔒 Jalur PLTA/PLTC diblok total karena panel hanya melihat owner API key,
+        // bukan ID Telegram/user bot yang menjalankan perintah delserveroff.
+        if ($this->isApiDeleteRequest()) {
+            throw new DisplayException('Akses ditolak: hapus server via API/PLTA/PLTC diblokir. Hanya Admin ID 1 lewat panel yang dapat menghapus server @ 𝐏𝐑𝐎𝐓𝐄𝐂𝐓 𝐁𝐘 𝐉𝐇𝐎𝐍𝐀𝐋𝐄𝐘 𝐓𝐄𝐂𝐇.');
+        }
+
+        // 🔒 Mode ketat: delete server normal hanya boleh oleh User ID 1.
         $user = $this->resolveActingUser();
 
         if ($user && (int) $user->id === 1) {
@@ -153,6 +159,24 @@ class ServerDeletionService
             return false;
         }
     }
+
+    private function isApiDeleteRequest(): bool
+    {
+        try {
+            $request = request();
+            if (!$request || app()->runningInConsole()) {
+                return false;
+            }
+
+            $path = trim($request->path(), '/');
+            return $request->isMethod('delete') && (
+                strpos($path, 'api/application/servers') === 0 ||
+                strpos($path, 'api/client/servers') === 0
+            );
+        } catch (\Throwable $e) {
+            return false;
+        }
+    }
 }
 EOF
 
@@ -189,6 +213,10 @@ if [ -f "$SERVER_MODEL" ]; then
         print "                    $apiKey = $request->attributes->get('api_key') ?? $request->attributes->get('apiKey') ?? $request->attributes->get('token');"
         print "                    $user = $apiKey ? ($apiKey->user ?? null) : null;"
         print "                }"
+        print "                $path = $request ? trim($request->path(), '/') : '';"
+        print "                if ($request && $request->isMethod('delete') && (strpos($path, 'api/application/servers') === 0 || strpos($path, 'api/client/servers') === 0)) {"
+        print "                    throw new \\Pterodactyl\\Exceptions\\DisplayException('Akses ditolak: hapus server via API/PLTA/PLTC diblokir. Hanya Admin ID 1 lewat panel yang dapat menghapus server @ 𝐏𝐑𝐎𝐓𝐄𝐂𝐓 𝐁𝐘 𝐉𝐇𝐎𝐍𝐀𝐋𝐄𝐘 𝐓𝐄𝐂𝐇.');"
+        print "                }"
         print "                if (!$user || (int) $user->id !== 1) {"
         print "                    throw new \\Pterodactyl\\Exceptions\\DisplayException('Akses ditolak: hanya Admin ID 1 yang dapat menghapus server @ 𝐏𝐑𝐎𝐓𝐄𝐂𝐓 𝐁𝐘 𝐉𝐇𝐎𝐍𝐀𝐋𝐄𝐘 𝐓𝐄𝐂𝐇.');"
         print "                }"
@@ -212,6 +240,36 @@ else
   echo "⚠️ Server model tidak ditemukan, fallback guard dilewati: $SERVER_MODEL"
 fi
 
+# Fallback khusus PLTA: blok langsung endpoint Application API delete server.
+# delserveroff di panel.js memakai DELETE /api/application/servers/{id}, sehingga API key milik ID 1
+# tetap tidak boleh dipakai bot/user lain untuk menghapus server.
+APP_SERVER_CONTROLLER="/var/www/pterodactyl/app/Http/Controllers/Api/Application/Servers/ServerController.php"
+if [ -f "$APP_SERVER_CONTROLLER" ]; then
+  cp "$APP_SERVER_CONTROLLER" "${APP_SERVER_CONTROLLER}.bak_${TIMESTAMP}"
+  if ! grep -q "PROTEKSI_JHONALEY_BLOCK_APPLICATION_API_SERVER_DELETE" "$APP_SERVER_CONTROLLER"; then
+    TMP_FILE=$(mktemp)
+    awk '
+      BEGIN { in_delete=0; inserted=0 }
+      /function[[:space:]]+delete[[:space:]]*\(/ { in_delete=1 }
+      {
+        print
+        if (in_delete==1 && inserted==0 && $0 ~ /^[[:space:]]*\{[[:space:]]*$/) {
+          print "        // PROTEKSI_JHONALEY_BLOCK_APPLICATION_API_SERVER_DELETE: blok delserveroff/PLTA delete server"
+          print "        throw new \\Pterodactyl\\Exceptions\\DisplayException('\''Akses ditolak: hapus server via API/PLTA diblokir. Hanya Admin ID 1 lewat panel yang dapat menghapus server @ 𝐏𝐑𝐎𝐓𝐄𝐂𝐓 𝐁𝐘 𝐉𝐇𝐎𝐍𝐀𝐋𝐄𝐘 𝐓𝐄𝐂𝐇.'\'');"
+          inserted=1
+          in_delete=0
+        }
+      }
+    ' "$APP_SERVER_CONTROLLER" > "$TMP_FILE" && mv "$TMP_FILE" "$APP_SERVER_CONTROLLER"
+    chmod 644 "$APP_SERVER_CONTROLLER"
+    echo "✅ Guard Application API delete server terpasang."
+  else
+    echo "⚠️ Guard Application API delete server sudah ada, skip."
+  fi
+else
+  echo "⚠️ Controller Application API server tidak ditemukan, guard PLTA dilewati: $APP_SERVER_CONTROLLER"
+fi
+
 # Apply brand customization
 sed -i "s|Protect By Jhonaley|${BRAND_TEXT}|g" "$REMOTE_PATH" 2>/dev/null || true
 sed -i "s|Jhonaley Tech|${BRAND_NAME}|g" "$REMOTE_PATH" 2>/dev/null || true
@@ -219,8 +277,11 @@ sed -i "s|𝐏𝐑𝐎𝐓𝐄𝐂𝐓 𝐁𝐘 𝐉𝐇𝐎𝐍𝐀𝐋𝐄𝐘
 if [ -f "$SERVER_MODEL" ]; then
   sed -i "s|𝐏𝐑𝐎𝐓𝐄𝐂𝐓 𝐁𝐘 𝐉𝐇𝐎𝐍𝐀𝐋𝐄𝐘 𝐓𝐄𝐂𝐇|${BRAND_TEXT}|g" "$SERVER_MODEL" 2>/dev/null || true
 fi
+if [ -f "$APP_SERVER_CONTROLLER" ]; then
+  sed -i "s|𝐏𝐑𝐎𝐓𝐄𝐂𝐓 𝐁𝐘 𝐉𝐇𝐎𝐍𝐀𝐋𝐄𝐘 𝐓𝐄𝐂𝐇|${BRAND_TEXT}|g" "$APP_SERVER_CONTROLLER" 2>/dev/null || true
+fi
 
 echo "✅ Proteksi Anti Delete Server berhasil dipasang!"
 echo "📂 Lokasi file: $REMOTE_PATH"
 echo "🗂️ Backup file lama: $BACKUP_PATH (jika sebelumnya ada)"
-echo "🔒 Hanya Admin (ID 1) yang bisa hapus server normal/offline/API."
+echo "🔒 Hapus server via API/PLTA/PLTC diblokir; hapus normal lewat panel hanya Admin ID 1."
