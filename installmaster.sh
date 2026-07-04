@@ -59,7 +59,7 @@ is_valid_script() {
 }
 
 echo "📥 Mendownload script proteksi terbaru (GitHub utama, preview fallback)..."
-for i in 1 2 3 4 5 6 7 8 9 10 11 12 13; do
+for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14; do
     DOWNLOADED=false
     TARGET="$SCRIPTS_DIR/installprotect${i}.sh"
     for attempt in 1 2 3; do
