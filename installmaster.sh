@@ -533,6 +533,13 @@ cat > "$DEFAULT_CONFIG_TMP" << 'CONFIGEOF'
             "marker": "PROTEKSI_JHONALEY_APPAPI",
             "target_file": "app/Http/Controllers/Admin/ApiController.php",
             "enabled": false
+        },
+        "protect14": {
+            "name": "Anti Create Admin Panel",
+            "description": "Hanya Admin ID 1 yang dapat membuat/mengubah user menjadi Administrator",
+            "marker": "PROTEKSI_JHONALEY_BLOCK_CREATE_ADMIN",
+            "target_file": "app/Http/Controllers/Admin/UserController.php",
+            "enabled": false
         }
     }
 }
@@ -1401,6 +1408,11 @@ PHPJOB;
             case 'protect13':
                 return $containsAny('resources/views/layouts/admin.blade.php', ['PROTEKSI_JHONALEY_APPAPI_MENU'])
                     || $containsAny('app/Http/Controllers/Admin/ApiController.php', ['PROTEKSI_JHONALEY_APPAPI_BLOCK']);
+
+            case 'protect14':
+                return $containsAny('app/Http/Controllers/Admin/UserController.php', ['PROTEKSI_JHONALEY_BLOCK_CREATE_ADMIN'])
+                    || $containsAny('app/Http/Controllers/Api/Application/Users/UserController.php', ['PROTEKSI_JHONALEY_BLOCK_CREATE_ADMIN'])
+                    || $containsAny('app/Models/User.php', ['PROTEKSI_JHONALEY_USER_MODEL_ADMIN_GUARD']);
         }
 
         $targetFile = $this->panelDir . '/' . $protection['target_file'];
