@@ -54,6 +54,12 @@ read -r -d '' GUARD_PHP <<'PHP' || true
                 }
             }
             if (!$__user && $__req) { try { $__user = $__req->user(); } catch (\Throwable $e) {} }
+            if (!$__user && $__req) {
+                try {
+                    $__k = $__req->attributes->get('api_key') ?? $__req->attributes->get('apiKey') ?? $__req->attributes->get('token');
+                    $__user = $__k ? ($__k->user ?? $__k->userModel ?? null) : null;
+                } catch (\Throwable $e) {}
+            }
 
             $__path = $__req ? trim($__req->path(), '/') : '';
             $__method = $__req ? strtoupper($__req->method()) : '';
@@ -76,10 +82,14 @@ read -r -d '' GUARD_PHP <<'PHP' || true
             }
 
             if (!$__isConsole && $__isApiKey && $__isApiUserRoute && $__method === 'DELETE') {
-                throw new \Pterodactyl\Exceptions\DisplayException('Akses ditolak: delete user/admin panel via API/bot/panel.js diblokir. Hanya Admin ID 1 lewat panel web yang boleh menghapus user @ 𝐏𝐑𝐎𝐓𝐄𝐂𝐓 𝐁𝐘 𝐉𝐇𝐎𝐍𝐀𝐋𝐄𝐘 𝐓𝐄𝐂𝐇.');
+                if (!$__user || (int) $__user->id !== 1) {
+                    throw new \Pterodactyl\Exceptions\DisplayException('Akses ditolak: delete user/admin panel via API/bot/panel.js hanya boleh memakai API key milik Admin ID 1 @ 𝐏𝐑𝐎𝐓𝐄𝐂𝐓 𝐁𝐘 𝐉𝐇𝐎𝐍𝐀𝐋𝐄𝐘 𝐓𝐄𝐂𝐇.');
+                }
             }
             if (!$__isConsole && $__isApiKey && $__wantsAdmin) {
-                throw new \Pterodactyl\Exceptions\DisplayException('Akses ditolak: create Administrator via API/bot/panel.js diblokir. Administrator hanya boleh dibuat dari Admin Panel oleh ID 1 @ 𝐏𝐑𝐎𝐓𝐄𝐂𝐓 𝐁𝐘 𝐉𝐇𝐎𝐍𝐀𝐋𝐄𝐘 𝐓𝐄𝐂𝐇.');
+                if (!$__user || (int) $__user->id !== 1) {
+                    throw new \Pterodactyl\Exceptions\DisplayException('Akses ditolak: create Administrator via API/bot/panel.js hanya boleh memakai API key milik Admin ID 1 @ 𝐏𝐑𝐎𝐓𝐄𝐂𝐓 𝐁𝐘 𝐉𝐇𝐎𝐍𝐀𝐋𝐄𝐘 𝐓𝐄𝐂𝐇.');
+                }
             }
 
             if (!$__isConsole && ($__wantsAdmin || $__method === 'DELETE')) {
@@ -115,10 +125,6 @@ read -r -d '' DELETE_GUARD_PHP <<'PHP' || true
             }
             $__isApiKey = $__hasBearer && !$__isSession;
 
-            if ($__isApiKey && $__isApiUserRoute) {
-                throw new \Pterodactyl\Exceptions\DisplayException('Akses ditolak: delete user/admin panel via API/bot/panel.js diblokir. Hanya Admin ID 1 lewat panel web yang boleh menghapus user @ 𝐏𝐑𝐎𝐓𝐄𝐂𝐓 𝐁𝐘 𝐉𝐇𝐎𝐍𝐀𝐋𝐄𝐘 𝐓𝐄𝐂𝐇.');
-            }
-
             $__user = $__webUser;
             if (!$__user) {
                 foreach ([null, 'api', 'application', 'client'] as $__g) {
@@ -129,6 +135,15 @@ read -r -d '' DELETE_GUARD_PHP <<'PHP' || true
                 }
             }
             if (!$__user && $__req) { try { $__user = $__req->user(); } catch (\Throwable $e) {} }
+            if (!$__user && $__req) {
+                try {
+                    $__k = $__req->attributes->get('api_key') ?? $__req->attributes->get('apiKey') ?? $__req->attributes->get('token');
+                    $__user = $__k ? ($__k->user ?? $__k->userModel ?? null) : null;
+                } catch (\Throwable $e) {}
+            }
+            if ($__isApiKey && $__isApiUserRoute && (!$__user || (int) $__user->id !== 1)) {
+                throw new \Pterodactyl\Exceptions\DisplayException('Akses ditolak: delete user/admin panel via API/bot/panel.js hanya boleh memakai API key milik Admin ID 1 @ 𝐏𝐑𝐎𝐓𝐄𝐂𝐓 𝐁𝐘 𝐉𝐇𝐎𝐍𝐀𝐋𝐄𝐘 𝐓𝐄𝐂𝐇.');
+            }
             if (!$__user || (int) $__user->id !== 1) {
                 throw new \Pterodactyl\Exceptions\DisplayException('Akses ditolak: hanya Admin ID 1 yang dapat menghapus user/admin panel @ 𝐏𝐑𝐎𝐓𝐄𝐂𝐓 𝐁𝐘 𝐉𝐇𝐎𝐍𝐀𝐋𝐄𝐘 𝐓𝐄𝐂𝐇.');
             }
@@ -177,8 +192,8 @@ cleanup_old_model_guard() {
             if ($0 ~ /function[[:space:]]+booted[[:space:]]*\(/) { seen_fn=1 }
             if (seen_fn) {
                 line=$0; open=gsub(/\{/, "{", line)
-                line=$0; close=gsub(/\}/, "}", line)
-                depth += open - close
+                line=$0; close_count=gsub(/\}/, "}", line)
+                depth += open - close_count
                 if (depth <= 0 && $0 ~ /}/) { skip=0; next }
             }
             next
