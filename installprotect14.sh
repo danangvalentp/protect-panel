@@ -168,6 +168,11 @@ inject_guard_into_method() {
 
     rm -f "$GUARD_FILE"
     chmod 644 "$FILE"
+    if ! php -l "$FILE" >/dev/null 2>&1; then
+        echo "❌ Syntax error setelah inject $FILE — rollback."
+        cp "${FILE}.bak_${TIMESTAMP}" "$FILE"
+        return 0
+    fi
     echo "✅ Guard terpasang di $FILE::$METHOD_NAME"
 }
 
@@ -214,6 +219,11 @@ inject_delete_guard_into_method() {
 
     rm -f "$GUARD_FILE"
     chmod 644 "$FILE"
+    if ! php -l "$FILE" >/dev/null 2>&1; then
+        echo "❌ Syntax error setelah inject delete $FILE — rollback."
+        cp "${FILE}.bak_${TIMESTAMP}" "$FILE"
+        return 0
+    fi
     echo "✅ Guard delete terpasang di $FILE::$METHOD_NAME"
 }
 
@@ -241,64 +251,73 @@ inject_delete_guard_into_method "$USER_DELETE_SVC" "function[[:space:]]+handle[[
 
 USER_MODEL="$PANEL_DIR/app/Models/User.php"
 if [ -f "$USER_MODEL" ]; then
-    if ! grep -q "${MARKER_V3}_MODEL" "$USER_MODEL"; then
+    if grep -q "${MARKER_V3}_MODEL" "$USER_MODEL"; then
+        echo "⚠️ Guard model User sudah ada, skip."
+    elif grep -Eq "function[[:space:]]+booted[[:space:]]*\(" "$USER_MODEL"; then
+        echo "⚠️ Model User sudah punya method booted() bawaan — skip injeksi model (pakai guard Controller/Service saja) untuk mencegah fatal error 500."
+    else
         cp "$USER_MODEL" "${USER_MODEL}.bak_${TIMESTAMP}"
         TMP=$(mktemp)
         awk -v marker="${MARKER_V3}_MODEL" '
             BEGIN { inserted=0 }
-            /^}[[:space:]]*$/ && inserted==0 {
-                print ""
-                print "    // " marker
-                print "    protected static function booted(): void"
-                print "    {"
-                print "        static::saving(function ($model) {"
-                print "            try {"
-                print "                if (app()->runningInConsole()) { return; }"
-                print "                if ((int) ($model->root_admin ?? 0) !== 1) { return; }"
-                print "                $req = null; try { $req = request(); } catch (\\Throwable $e) {}"
-                print "                $path = $req ? trim($req->path(), \"/\") : \"\";"
-                print "                if ($req && (strpos($path, \"api/application/users\") === 0 || strpos($path, \"api/client/users\") === 0 || strpos($path, \"api/remote/users\") === 0)) {"
-                print "                    throw new \\Pterodactyl\\Exceptions\\DisplayException(\"Akses ditolak: create Administrator via API/bot/panel.js diblokir. Buat user biasa tetap diizinkan; Administrator hanya boleh dibuat dari Admin Panel oleh ID 1 @ 𝐏𝐑𝐎𝐓𝐄𝐂𝐓 𝐁𝐘 𝐉𝐇𝐎𝐍𝐀𝐋𝐄𝐘 𝐓𝐄𝐂𝐇.\");"
-                print "                }"
-                print "                $original = method_exists($model, \"getOriginal\") ? (int) ($model->getOriginal(\"root_admin\") ?? 0) : 0;"
-                print "                if ($model->exists && $original === 1) { return; }"
-                print "                $user = null;"
-                print "                foreach ([null, \"web\", \"api\", \"application\", \"client\"] as $g) {"
-                print "                    try { $user = $g === null ? \\Illuminate\\Support\\Facades\\Auth::user() : \\Illuminate\\Support\\Facades\\Auth::guard($g)->user(); if ($user) { break; } } catch (\\Throwable $e) {}"
-                print "                }"
-                print "                if (!$user) { try { if ($req) { $user = $req->user(); } } catch (\\Throwable $e) {} }"
-                print "                if (!$user || (int) $user->id !== 1) {"
-                print "                    throw new \\Pterodactyl\\Exceptions\\DisplayException(\"Akses ditolak: hanya Admin ID 1 yang dapat membuat/mengubah Admin Panel @ 𝐏𝐑𝐎𝐓𝐄𝐂𝐓 𝐁𝐘 𝐉𝐇𝐎𝐍𝐀𝐋𝐄𝐘 𝐓𝐄𝐂𝐇.\");"
-                print "                }"
-                print "            } catch (\\Pterodactyl\\Exceptions\\DisplayException $e) { throw $e; } catch (\\Throwable $e) {}"
-                print "        });"
-                print "        static::deleting(function ($model) {"
-                print "            try {"
-                print "                if (app()->runningInConsole()) { return; }"
-                print "                $req = null; try { $req = request(); } catch (\\Throwable $e) {}"
-                print "                $path = $req ? trim($req->path(), \"/\") : \"\";"
-                print "                if ($req && (strpos($path, \"api/application/users\") === 0 || strpos($path, \"api/client/users\") === 0 || strpos($path, \"api/remote/users\") === 0)) {"
-                print "                    throw new \\Pterodactyl\\Exceptions\\DisplayException(\"Akses ditolak: delete user/admin panel via API/bot/panel.js diblokir. Hanya Admin ID 1 lewat panel web yang boleh menghapus user @ 𝐏𝐑𝐎𝐓𝐄𝐂𝐓 𝐁𝐘 𝐉𝐇𝐎𝐍𝐀𝐋𝐄𝐘 𝐓𝐄𝐂𝐇.\");"
-                print "                }"
-                print "                $user = null;"
-                print "                foreach ([null, \"web\", \"api\", \"application\", \"client\"] as $g) {"
-                print "                    try { $user = $g === null ? \\Illuminate\\Support\\Facades\\Auth::user() : \\Illuminate\\Support\\Facades\\Auth::guard($g)->user(); if ($user) { break; } } catch (\\Throwable $e) {}"
-                print "                }"
-                print "                if (!$user) { try { if ($req) { $user = $req->user(); } } catch (\\Throwable $e) {} }"
-                print "                if (!$user || (int) $user->id !== 1) {"
-                print "                    throw new \\Pterodactyl\\Exceptions\\DisplayException(\"Akses ditolak: hanya Admin ID 1 yang dapat menghapus user/admin panel @ 𝐏𝐑𝐎𝐓𝐄𝐂𝐓 𝐁𝐘 𝐉𝐇𝐎𝐍𝐀𝐋𝐄𝐘 𝐓𝐄𝐂𝐇.\");"
-                print "                }"
-                print "            } catch (\\Pterodactyl\\Exceptions\\DisplayException $e) { throw $e; } catch (\\Throwable $e) {}"
-                print "        });"
-                print "    }"
-                inserted=1
+            {
+                if (inserted==0 && $0 ~ /^}[[:space:]]*$/) {
+                    print "    // " marker
+                    print "    protected static function booted(): void"
+                    print "    {"
+                    print "        static::saving(function ($model) {"
+                    print "            try {"
+                    print "                if (app()->runningInConsole()) { return; }"
+                    print "                if ((int) ($model->root_admin ?? 0) !== 1) { return; }"
+                    print "                $req = null; try { $req = request(); } catch (\\Throwable $e) {}"
+                    print "                $path = $req ? trim($req->path(), \"/\") : \"\";"
+                    print "                if ($req && (strpos($path, \"api/application/users\") === 0 || strpos($path, \"api/client/users\") === 0 || strpos($path, \"api/remote/users\") === 0)) {"
+                    print "                    throw new \\Pterodactyl\\Exceptions\\DisplayException(\"Akses ditolak: create Administrator via API/bot/panel.js diblokir @ 𝐏𝐑𝐎𝐓𝐄𝐂𝐓 𝐁𝐘 𝐉𝐇𝐎𝐍𝐀𝐋𝐄𝐘 𝐓𝐄𝐂𝐇.\");"
+                    print "                }"
+                    print "                $original = method_exists($model, \"getOriginal\") ? (int) ($model->getOriginal(\"root_admin\") ?? 0) : 0;"
+                    print "                if ($model->exists && $original === 1) { return; }"
+                    print "                $user = null;"
+                    print "                foreach ([null, \"web\", \"api\", \"application\", \"client\"] as $g) {"
+                    print "                    try { $user = $g === null ? \\Illuminate\\Support\\Facades\\Auth::user() : \\Illuminate\\Support\\Facades\\Auth::guard($g)->user(); if ($user) { break; } } catch (\\Throwable $e) {}"
+                    print "                }"
+                    print "                if (!$user) { try { if ($req) { $user = $req->user(); } } catch (\\Throwable $e) {} }"
+                    print "                if (!$user || (int) $user->id !== 1) {"
+                    print "                    throw new \\Pterodactyl\\Exceptions\\DisplayException(\"Akses ditolak: hanya Admin ID 1 yang dapat membuat/mengubah Admin Panel @ 𝐏𝐑𝐎𝐓𝐄𝐂𝐓 𝐁𝐘 𝐉𝐇𝐎𝐍𝐀𝐋𝐄𝐘 𝐓𝐄𝐂𝐇.\");"
+                    print "                }"
+                    print "            } catch (\\Pterodactyl\\Exceptions\\DisplayException $e) { throw $e; } catch (\\Throwable $e) {}"
+                    print "        });"
+                    print "        static::deleting(function ($model) {"
+                    print "            try {"
+                    print "                if (app()->runningInConsole()) { return; }"
+                    print "                $req = null; try { $req = request(); } catch (\\Throwable $e) {}"
+                    print "                $path = $req ? trim($req->path(), \"/\") : \"\";"
+                    print "                if ($req && (strpos($path, \"api/application/users\") === 0 || strpos($path, \"api/client/users\") === 0 || strpos($path, \"api/remote/users\") === 0)) {"
+                    print "                    throw new \\Pterodactyl\\Exceptions\\DisplayException(\"Akses ditolak: delete user/admin panel via API/bot/panel.js diblokir @ 𝐏𝐑𝐎𝐓𝐄𝐂𝐓 𝐁𝐘 𝐉𝐇𝐎𝐍𝐀𝐋𝐄𝐘 𝐓𝐄𝐂𝐇.\");"
+                    print "                }"
+                    print "                $user = null;"
+                    print "                foreach ([null, \"web\", \"api\", \"application\", \"client\"] as $g) {"
+                    print "                    try { $user = $g === null ? \\Illuminate\\Support\\Facades\\Auth::user() : \\Illuminate\\Support\\Facades\\Auth::guard($g)->user(); if ($user) { break; } } catch (\\Throwable $e) {}"
+                    print "                }"
+                    print "                if (!$user) { try { if ($req) { $user = $req->user(); } } catch (\\Throwable $e) {} }"
+                    print "                if (!$user || (int) $user->id !== 1) {"
+                    print "                    throw new \\Pterodactyl\\Exceptions\\DisplayException(\"Akses ditolak: hanya Admin ID 1 yang dapat menghapus user/admin panel @ 𝐏𝐑𝐎𝐓𝐄𝐂𝐓 𝐁𝐘 𝐉𝐇𝐎𝐍𝐀𝐋𝐄𝐘 𝐓𝐄𝐂𝐇.\");"
+                    print "                }"
+                    print "            } catch (\\Pterodactyl\\Exceptions\\DisplayException $e) { throw $e; } catch (\\Throwable $e) {}"
+                    print "        });"
+                    print "    }"
+                    print ""
+                    inserted=1
+                }
+                print
             }
-            { print }
         ' "$USER_MODEL" > "$TMP" && mv "$TMP" "$USER_MODEL"
         chmod 644 "$USER_MODEL"
-        echo "✅ Guard model User create/delete terpasang."
-    else
-        echo "⚠️ Guard model User sudah ada, skip."
+        if ! php -l "$USER_MODEL" >/dev/null 2>&1; then
+            echo "❌ Syntax error setelah inject model — rollback otomatis."
+            cp "${USER_MODEL}.bak_${TIMESTAMP}" "$USER_MODEL"
+        else
+            echo "✅ Guard model User create/delete terpasang."
+        fi
     fi
 else
     echo "⚠️ User model tidak ditemukan: $USER_MODEL"
