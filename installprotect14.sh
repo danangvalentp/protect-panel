@@ -22,10 +22,11 @@ echo "==========================================="
 echo "🔒 INSTALLPROTECT14: Anti Create/Delete Admin Panel"
 echo "==========================================="
 
-MARKER_V3="PROTEKSI_JHONALEY_USER_ADMIN_PANEL_GUARD_V3"
+MARKER_V3="PROTEKSI_JHONALEY_USER_ADMIN_PANEL_GUARD_V4"
+OLD_MARKER_REGEX="PROTEKSI_JHONALEY_USER_ADMIN_PANEL_GUARD_V[0-9]+"
 
 read -r -d '' GUARD_PHP <<'PHP' || true
-        // PROTEKSI_JHONALEY_USER_ADMIN_PANEL_GUARD_V3
+        // PROTEKSI_JHONALEY_USER_ADMIN_PANEL_GUARD_V4
         try {
             $__req = request();
             $__isConsole = app()->runningInConsole();
@@ -90,7 +91,7 @@ read -r -d '' GUARD_PHP <<'PHP' || true
 PHP
 
 read -r -d '' DELETE_GUARD_PHP <<'PHP' || true
-        // PROTEKSI_JHONALEY_USER_ADMIN_PANEL_GUARD_V3_DELETE
+        // PROTEKSI_JHONALEY_USER_ADMIN_PANEL_GUARD_V4_DELETE
         try {
             if (!app()->runningInConsole()) {
             $__req = request();
@@ -135,41 +136,63 @@ read -r -d '' DELETE_GUARD_PHP <<'PHP' || true
         } catch (\Pterodactyl\Exceptions\DisplayException $e) { throw $e; } catch (\Throwable $e) {}
 PHP
 
-read -r -d '' DELETE_GUARD_PHP <<'PHP' || true
-        // PROTEKSI_JHONALEY_USER_ADMIN_PANEL_GUARD_V3_DELETE
-        try {
-            if (!app()->runningInConsole()) {
-            $__req = request();
-            $__path = $__req ? trim($__req->path(), '/') : '';
-            $__isApiUserRoute = $__path !== '' && (
-                strpos($__path, 'api/application/users') === 0 ||
-                strpos($__path, 'api/client/users') === 0 ||
-                strpos($__path, 'api/remote/users') === 0
-            );
-            if ($__isApiUserRoute) {
-                throw new \Pterodactyl\Exceptions\DisplayException('Akses ditolak: delete user/admin panel via API/bot/panel.js diblokir. Hanya Admin ID 1 lewat panel web yang boleh menghapus user @ 𝐏𝐑𝐎𝐓𝐄𝐂𝐓 𝐁𝐘 𝐉𝐇𝐎𝐍𝐀𝐋𝐄𝐘 𝐓𝐄𝐂𝐇.');
-            }
+cleanup_old_method_guards() {
+    local FILE="$1"
+    [ -f "$FILE" ] || return 0
+    grep -Eq "$OLD_MARKER_REGEX" "$FILE" || return 0
 
-            $__user = null;
-            foreach ([null, 'web', 'api', 'application', 'client'] as $__g) {
-                try {
-                    $__user = $__g === null ? \Illuminate\Support\Facades\Auth::user() : \Illuminate\Support\Facades\Auth::guard($__g)->user();
-                    if ($__user) { break; }
-                } catch (\Throwable $e) {}
+    cp "$FILE" "${FILE}.bak_pre_p14_v4_${TIMESTAMP}"
+    local TMP
+    TMP=$(mktemp)
+    awk -v marker="$OLD_MARKER_REGEX" '
+        BEGIN { skip=0 }
+        $0 ~ marker && $0 !~ /_MODEL/ { skip=1; next }
+        skip == 1 {
+            if ($0 ~ /catch[[:space:]]*\(\\Pterodactyl\\Exceptions\\DisplayException[[:space:]]+\$e\)/ && $0 ~ /catch[[:space:]]*\(\\Throwable[[:space:]]+\$e\)[[:space:]]*\{\}/) { skip=0; next }
+            next
+        }
+        { print }
+    ' "$FILE" > "$TMP" && mv "$TMP" "$FILE"
+    chmod 644 "$FILE"
+    if ! php -l "$FILE" >/dev/null 2>&1; then
+        echo "❌ Cleanup guard lama gagal di $FILE — rollback."
+        cp "${FILE}.bak_pre_p14_v4_${TIMESTAMP}" "$FILE"
+    else
+        echo "♻️ Guard lama Protect14 dibersihkan dari $FILE"
+    fi
+}
+
+cleanup_old_model_guard() {
+    local FILE="$1"
+    [ -f "$FILE" ] || return 0
+    grep -Eq "${OLD_MARKER_REGEX}_MODEL" "$FILE" || return 0
+
+    cp "$FILE" "${FILE}.bak_pre_p14_v4_${TIMESTAMP}"
+    local TMP
+    TMP=$(mktemp)
+    awk -v marker="${OLD_MARKER_REGEX}_MODEL" '
+        BEGIN { skip=0; depth=0; seen_fn=0 }
+        skip == 0 && $0 ~ marker { skip=1; depth=0; seen_fn=0; next }
+        skip == 1 {
+            if ($0 ~ /function[[:space:]]+booted[[:space:]]*\(/) { seen_fn=1 }
+            if (seen_fn) {
+                line=$0; open=gsub(/\{/, "{", line)
+                line=$0; close=gsub(/\}/, "}", line)
+                depth += open - close
+                if (depth <= 0 && $0 ~ /}/) { skip=0; next }
             }
-            if (!$__user && $__req) { try { $__user = $__req->user(); } catch (\Throwable $e) {} }
-            if (!$__user && $__req) {
-                try {
-                    $__k = $__req->attributes->get('api_key') ?? $__req->attributes->get('apiKey') ?? $__req->attributes->get('token');
-                    $__user = $__k ? ($__k->user ?? null) : null;
-                } catch (\Throwable $e) {}
-            }
-            if (!$__user || (int) $__user->id !== 1) {
-                throw new \Pterodactyl\Exceptions\DisplayException('Akses ditolak: hanya Admin ID 1 yang dapat menghapus user/admin panel @ 𝐏𝐑𝐎𝐓𝐄𝐂𝐓 𝐁𝐘 𝐉𝐇𝐎𝐍𝐀𝐋𝐄𝐘 𝐓𝐄𝐂𝐇.');
-            }
-            }
-        } catch (\Pterodactyl\Exceptions\DisplayException $e) { throw $e; } catch (\Throwable $e) {}
-PHP
+            next
+        }
+        { print }
+    ' "$FILE" > "$TMP" && mv "$TMP" "$FILE"
+    chmod 644 "$FILE"
+    if ! php -l "$FILE" >/dev/null 2>&1; then
+        echo "❌ Cleanup guard model lama gagal — rollback."
+        cp "${FILE}.bak_pre_p14_v4_${TIMESTAMP}" "$FILE"
+    else
+        echo "♻️ Guard model lama Protect14 dibersihkan dari $FILE"
+    fi
+}
 
 inject_guard_into_method() {
     local FILE="$1"
@@ -284,28 +307,34 @@ inject_delete_guard_into_method() {
 }
 
 ADMIN_USER_CTRL="$PANEL_DIR/app/Http/Controllers/Admin/UserController.php"
+APP_USER_CTRL="$PANEL_DIR/app/Http/Controllers/Api/Application/Users/UserController.php"
+CLIENT_USER_CTRL="$PANEL_DIR/app/Http/Controllers/Api/Client/Users/UserController.php"
+USER_CREATE_SVC="$PANEL_DIR/app/Services/Users/UserCreationService.php"
+USER_UPDATE_SVC="$PANEL_DIR/app/Services/Users/UserUpdateService.php"
+USER_DELETE_SVC="$PANEL_DIR/app/Services/Users/UserDeletionService.php"
+USER_MODEL="$PANEL_DIR/app/Models/User.php"
+
+for F in "$ADMIN_USER_CTRL" "$APP_USER_CTRL" "$CLIENT_USER_CTRL" "$USER_CREATE_SVC" "$USER_UPDATE_SVC" "$USER_DELETE_SVC"; do
+    cleanup_old_method_guards "$F"
+done
+cleanup_old_model_guard "$USER_MODEL"
+
 inject_guard_into_method "$ADMIN_USER_CTRL" "function[[:space:]]+store[[:space:]]*[(]" "ADMIN_STORE"
 inject_guard_into_method "$ADMIN_USER_CTRL" "function[[:space:]]+update[[:space:]]*[(]" "ADMIN_UPDATE"
 inject_delete_guard_into_method "$ADMIN_USER_CTRL" "function[[:space:]]+(delete|destroy)[[:space:]]*[(]" "ADMIN_DELETE"
 
-APP_USER_CTRL="$PANEL_DIR/app/Http/Controllers/Api/Application/Users/UserController.php"
 inject_guard_into_method "$APP_USER_CTRL" "function[[:space:]]+store[[:space:]]*[(]" "APP_API_STORE"
 inject_guard_into_method "$APP_USER_CTRL" "function[[:space:]]+update[[:space:]]*[(]" "APP_API_UPDATE"
 inject_delete_guard_into_method "$APP_USER_CTRL" "function[[:space:]]+(delete|destroy)[[:space:]]*[(]" "APP_API_DELETE"
 
-CLIENT_USER_CTRL="$PANEL_DIR/app/Http/Controllers/Api/Client/Users/UserController.php"
 inject_delete_guard_into_method "$CLIENT_USER_CTRL" "function[[:space:]]+(delete|destroy)[[:space:]]*[(]" "CLIENT_API_DELETE"
 
-USER_CREATE_SVC="$PANEL_DIR/app/Services/Users/UserCreationService.php"
 inject_guard_into_method "$USER_CREATE_SVC" "function[[:space:]]+handle[[:space:]]*[(]" "USER_CREATE_SERVICE_HANDLE"
 
-USER_UPDATE_SVC="$PANEL_DIR/app/Services/Users/UserUpdateService.php"
 inject_guard_into_method "$USER_UPDATE_SVC" "function[[:space:]]+handle[[:space:]]*[(]" "USER_UPDATE_SERVICE_HANDLE"
 
-USER_DELETE_SVC="$PANEL_DIR/app/Services/Users/UserDeletionService.php"
 inject_delete_guard_into_method "$USER_DELETE_SVC" "function[[:space:]]+handle[[:space:]]*[(]" "USER_DELETE_SERVICE_HANDLE"
 
-USER_MODEL="$PANEL_DIR/app/Models/User.php"
 if [ -f "$USER_MODEL" ]; then
     if grep -q "${MARKER_V3}_MODEL" "$USER_MODEL"; then
         echo "⚠️ Guard model User sudah ada, skip."
