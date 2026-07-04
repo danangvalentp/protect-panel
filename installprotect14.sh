@@ -29,21 +29,30 @@ read -r -d '' GUARD_PHP <<'PHP' || true
         try {
             $__req = request();
             $__isConsole = app()->runningInConsole();
-            $__user = null;
 
-            foreach ([null, 'web', 'api', 'application', 'client'] as $__g) {
+            $__webUser = null;
+            try { $__webUser = \Illuminate\Support\Facades\Auth::guard('web')->user(); } catch (\Throwable $e) {}
+            $__isSession = $__webUser !== null;
+            $__hasBearer = false;
+            if ($__req) {
                 try {
-                    $__user = $__g === null ? \Illuminate\Support\Facades\Auth::user() : \Illuminate\Support\Facades\Auth::guard($__g)->user();
-                    if ($__user) { break; }
+                    $__auth = (string) ($__req->header('Authorization') ?? '');
+                    if ($__auth !== '' && stripos($__auth, 'Bearer ') === 0) { $__hasBearer = true; }
+                    if ($__req->attributes->get('api_key') || $__req->attributes->get('apiKey') || $__req->attributes->get('token')) { $__hasBearer = true; }
                 } catch (\Throwable $e) {}
+            }
+            $__isApiKey = $__hasBearer && !$__isSession;
+
+            $__user = $__webUser;
+            if (!$__user) {
+                foreach ([null, 'api', 'application', 'client'] as $__g) {
+                    try {
+                        $__user = $__g === null ? \Illuminate\Support\Facades\Auth::user() : \Illuminate\Support\Facades\Auth::guard($__g)->user();
+                        if ($__user) { break; }
+                    } catch (\Throwable $e) {}
+                }
             }
             if (!$__user && $__req) { try { $__user = $__req->user(); } catch (\Throwable $e) {} }
-            if (!$__user && $__req) {
-                try {
-                    $__k = $__req->attributes->get('api_key') ?? $__req->attributes->get('apiKey') ?? $__req->attributes->get('token');
-                    $__user = $__k ? ($__k->user ?? null) : null;
-                } catch (\Throwable $e) {}
-            }
 
             $__path = $__req ? trim($__req->path(), '/') : '';
             $__method = $__req ? strtoupper($__req->method()) : '';
@@ -54,14 +63,6 @@ read -r -d '' GUARD_PHP <<'PHP' || true
             );
 
             $__wantsAdmin = false;
-            foreach (['data', 'attributes', 'input'] as $__varName) {
-                try {
-                    $__vars = get_defined_vars();
-                    $__payload = $__vars[$__varName] ?? null;
-                    if (is_array($__payload) && array_key_exists('root_admin', $__payload) && (int) $__payload['root_admin'] === 1) { $__wantsAdmin = true; }
-                    if (is_array($__payload) && array_key_exists('admin', $__payload) && (int) $__payload['admin'] === 1) { $__wantsAdmin = true; }
-                } catch (\Throwable $e) {}
-            }
             if ($__req) {
                 try {
                     $__ra = $__req->input('root_admin');
@@ -73,18 +74,63 @@ read -r -d '' GUARD_PHP <<'PHP' || true
                 } catch (\Throwable $e) {}
             }
 
-            if (!$__isConsole && $__isApiUserRoute && $__method === 'DELETE') {
+            if (!$__isConsole && $__isApiKey && $__isApiUserRoute && $__method === 'DELETE') {
                 throw new \Pterodactyl\Exceptions\DisplayException('Akses ditolak: delete user/admin panel via API/bot/panel.js diblokir. Hanya Admin ID 1 lewat panel web yang boleh menghapus user @ 𝐏𝐑𝐎𝐓𝐄𝐂𝐓 𝐁𝐘 𝐉𝐇𝐎𝐍𝐀𝐋𝐄𝐘 𝐓𝐄𝐂𝐇.');
             }
-
-            if (!$__isConsole && $__isApiUserRoute && $__wantsAdmin) {
-                throw new \Pterodactyl\Exceptions\DisplayException('Akses ditolak: create Administrator via API/bot/panel.js diblokir. Buat user biasa tetap diizinkan; Administrator hanya boleh dibuat dari Admin Panel oleh ID 1 @ 𝐏𝐑𝐎𝐓𝐄𝐂𝐓 𝐁𝐘 𝐉𝐇𝐎𝐍𝐀𝐋𝐄𝐘 𝐓𝐄𝐂𝐇.');
+            if (!$__isConsole && $__isApiKey && $__wantsAdmin) {
+                throw new \Pterodactyl\Exceptions\DisplayException('Akses ditolak: create Administrator via API/bot/panel.js diblokir. Administrator hanya boleh dibuat dari Admin Panel oleh ID 1 @ 𝐏𝐑𝐎𝐓𝐄𝐂𝐓 𝐁𝐘 𝐉𝐇𝐎𝐍𝐀𝐋𝐄𝐘 𝐓𝐄𝐂𝐇.');
             }
 
             if (!$__isConsole && ($__wantsAdmin || $__method === 'DELETE')) {
                 if (!$__user || (int) $__user->id !== 1) {
                     throw new \Pterodactyl\Exceptions\DisplayException('Akses ditolak: hanya Admin ID 1 yang dapat membuat/mengubah/menghapus Admin Panel @ 𝐏𝐑𝐎𝐓𝐄𝐂𝐓 𝐁𝐘 𝐉𝐇𝐎𝐍𝐀𝐋𝐄𝐘 𝐓𝐄𝐂𝐇.');
                 }
+            }
+        } catch (\Pterodactyl\Exceptions\DisplayException $e) { throw $e; } catch (\Throwable $e) {}
+PHP
+
+read -r -d '' DELETE_GUARD_PHP <<'PHP' || true
+        // PROTEKSI_JHONALEY_USER_ADMIN_PANEL_GUARD_V3_DELETE
+        try {
+            if (!app()->runningInConsole()) {
+            $__req = request();
+            $__path = $__req ? trim($__req->path(), '/') : '';
+            $__isApiUserRoute = $__path !== '' && (
+                strpos($__path, 'api/application/users') === 0 ||
+                strpos($__path, 'api/client/users') === 0 ||
+                strpos($__path, 'api/remote/users') === 0
+            );
+
+            $__webUser = null;
+            try { $__webUser = \Illuminate\Support\Facades\Auth::guard('web')->user(); } catch (\Throwable $e) {}
+            $__isSession = $__webUser !== null;
+            $__hasBearer = false;
+            if ($__req) {
+                try {
+                    $__auth = (string) ($__req->header('Authorization') ?? '');
+                    if ($__auth !== '' && stripos($__auth, 'Bearer ') === 0) { $__hasBearer = true; }
+                    if ($__req->attributes->get('api_key') || $__req->attributes->get('apiKey') || $__req->attributes->get('token')) { $__hasBearer = true; }
+                } catch (\Throwable $e) {}
+            }
+            $__isApiKey = $__hasBearer && !$__isSession;
+
+            if ($__isApiKey && $__isApiUserRoute) {
+                throw new \Pterodactyl\Exceptions\DisplayException('Akses ditolak: delete user/admin panel via API/bot/panel.js diblokir. Hanya Admin ID 1 lewat panel web yang boleh menghapus user @ 𝐏𝐑𝐎𝐓𝐄𝐂𝐓 𝐁𝐘 𝐉𝐇𝐎𝐍𝐀𝐋𝐄𝐘 𝐓𝐄𝐂𝐇.');
+            }
+
+            $__user = $__webUser;
+            if (!$__user) {
+                foreach ([null, 'api', 'application', 'client'] as $__g) {
+                    try {
+                        $__user = $__g === null ? \Illuminate\Support\Facades\Auth::user() : \Illuminate\Support\Facades\Auth::guard($__g)->user();
+                        if ($__user) { break; }
+                    } catch (\Throwable $e) {}
+                }
+            }
+            if (!$__user && $__req) { try { $__user = $__req->user(); } catch (\Throwable $e) {} }
+            if (!$__user || (int) $__user->id !== 1) {
+                throw new \Pterodactyl\Exceptions\DisplayException('Akses ditolak: hanya Admin ID 1 yang dapat menghapus user/admin panel @ 𝐏𝐑𝐎𝐓𝐄𝐂𝐓 𝐁𝐘 𝐉𝐇𝐎𝐍𝐀𝐋𝐄𝐘 𝐓𝐄𝐂𝐇.');
+            }
             }
         } catch (\Pterodactyl\Exceptions\DisplayException $e) { throw $e; } catch (\Throwable $e) {}
 PHP
