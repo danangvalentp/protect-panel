@@ -42,20 +42,47 @@ else
     cp "$SIDEBAR_FILE" "${SIDEBAR_FILE}.bak_${TIMESTAMP}"
     echo "💾 Backup: ${SIDEBAR_FILE}.bak_${TIMESTAMP}"
 
-    if grep -q "PROTEKSI_JHONALEY_APPAPI_MENU" "$SIDEBAR_FILE"; then
-        echo "⚠️ Proteksi sudah ada, skip..."
-    else
-        export APPAPI_SIDEBAR="$SIDEBAR_FILE"
-        python3 << 'PYEOF_APPAPI'
+    export APPAPI_SIDEBAR="$SIDEBAR_FILE"
+    python3 << 'PYEOF_APPAPI'
 import os, re
 
 sidebar = os.environ["APPAPI_SIDEBAR"]
 with open(sidebar, "r") as f:
     content = f.read()
 
+# ── Bersihkan blok marker lama (baik format V1 hide-only maupun V2 gembok) ──
 if "PROTEKSI_JHONALEY_APPAPI_MENU" in content:
-    print("⚠️ Sudah diproteksi")
-    raise SystemExit(0)
+    lines_all = content.split("\n")
+    cleaned = []
+    skip = False
+    saw_end_marker = False
+    depth = 0
+    for ln in lines_all:
+        if not skip and "PROTEKSI_JHONALEY_APPAPI_MENU" in ln and "END" not in ln:
+            skip = True
+            saw_end_marker = False
+            depth = 0
+            continue
+        if skip:
+            if "END PROTEKSI_JHONALEY_APPAPI_MENU" in ln:
+                skip = False
+                saw_end_marker = True
+                continue
+            # fallback: format lama tanpa END marker → strip sampai @endif seimbang
+            if "@if" in ln:
+                depth += ln.count("@if")
+            if "@endif" in ln:
+                depth -= ln.count("@endif")
+                if depth <= 0 and not saw_end_marker:
+                    skip = False
+                    continue
+            continue
+        cleaned.append(ln)
+    content = "\n".join(cleaned)
+    with open(sidebar, "w") as f:
+        f.write(content)
+    print("♻️ Blok marker lama dibersihkan, akan inject ulang")
+
 
 def lock_transform(block_text):
     def repl(m):
@@ -111,8 +138,8 @@ with open(sidebar, "w") as f:
 
 print("✅ Menu Application API dikunci (gembok) untuk non-ID 1")
 PYEOF_APPAPI
-    fi
 fi
+
 
 echo "✅ BAGIAN 1 SELESAI"
 

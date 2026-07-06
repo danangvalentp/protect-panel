@@ -58,8 +58,9 @@ while i < len(lines):
         j = i
         while j < len(lines) and '{' not in lines[j]:
             j += 1
-            if j > i:
-                new_lines.append(lines[j])
+        if j < len(lines) and j > i:
+            for _k in range(i+1, j+1):
+                new_lines.append(lines[_k])
         
         new_lines.append("        // PROTEKSI_JHONALEY: Hanya admin ID 1")
         new_lines.append("        if (!Auth::user() || (int) Auth::user()->id !== 1) {")
@@ -213,8 +214,9 @@ while i < len(lines):
         j = i
         while j < len(lines) and '{' not in lines[j]:
             j += 1
-            if j > i:
-                new_lines.append(lines[j])
+        if j < len(lines) and j > i:
+            for _k in range(i+1, j+1):
+                new_lines.append(lines[_k])
         
         new_lines.append("        // PROTEKSI_JHONALEY: Hanya admin ID 1")
         new_lines.append("        if (!Auth::user() || (int) Auth::user()->id !== 1) {")
@@ -293,8 +295,9 @@ while i < len(lines):
         j = i
         while j < len(lines) and '{' not in lines[j]:
             j += 1
-            if j > i:
-                new_lines.append(lines[j])
+        if j < len(lines) and j > i:
+            for _k in range(i+1, j+1):
+                new_lines.append(lines[_k])
         
         new_lines.append("        // PROTEKSI_JHONALEY_ACCOUNT: Block ubah data admin ID 1")
         new_lines.append("        \$targetUser = \$request->user();")
@@ -550,8 +553,9 @@ while i < len(lines):
         j = i
         while j < len(lines) and '{' not in lines[j]:
             j += 1
-            if j > i:
-                new_lines.append(lines[j])
+        if j < len(lines) and j > i:
+            for _k in range(i+1, j+1):
+                new_lines.append(lines[_k])
         
         new_lines.append("        // PROTEKSI_JHONALEY_APPUSER: Block akses API untuk admin ID 1")
         if 'User \$user' in line or (j > i and any('User \$user' in lines[k] for k in range(i, min(j+1, len(lines))))):
@@ -636,8 +640,9 @@ while i < len(lines):
         j = i
         while j < len(lines) and '{' not in lines[j]:
             j += 1
-            if j > i:
-                new_lines.append(lines[j])
+        if j < len(lines) and j > i:
+            for _k in range(i+1, j+1):
+                new_lines.append(lines[_k])
         
         new_lines.append("        // PROTEKSI_JHONALEY_APIKEY: Setiap admin hanya lihat key milik sendiri")
         new_lines.append("        if (Auth::user() && (int) Auth::user()->id !== 1) {")
@@ -655,8 +660,9 @@ while i < len(lines):
         j = i
         while j < len(lines) and '{' not in lines[j]:
             j += 1
-            if j > i:
-                new_lines.append(lines[j])
+        if j < len(lines) and j > i:
+            for _k in range(i+1, j+1):
+                new_lines.append(lines[_k])
         
         new_lines.append("        // PROTEKSI_JHONALEY_APIKEY: Block buat key atas nama User ID 1")
         new_lines.append("        $targetUserId = (int) ($request->input('user_id') ?? $request->input('user') ?? 0);")
@@ -672,8 +678,9 @@ while i < len(lines):
         j = i
         while j < len(lines) and '{' not in lines[j]:
             j += 1
-            if j > i:
-                new_lines.append(lines[j])
+        if j < len(lines) and j > i:
+            for _k in range(i+1, j+1):
+                new_lines.append(lines[_k])
         
         new_lines.append("        // PROTEKSI_JHONALEY_APIKEY: Block hapus key milik User ID 1")
         new_lines.append("        if (!Auth::user() || (int) Auth::user()->id !== 1) {")
@@ -962,8 +969,9 @@ while i < len(lines):
         j = i
         while j < len(lines) and '{' not in lines[j]:
             j += 1
-            if j > i:
-                new_lines.append(lines[j])
+        if j < len(lines) and j > i:
+            for _k in range(i+1, j+1):
+                new_lines.append(lines[_k])
         
         new_lines.append("        // PROTEKSI_JHONALEY_LOCATION: Hanya admin ID 1")
         new_lines.append("        if (!Auth::user() || (int) Auth::user()->id !== 1) {")
