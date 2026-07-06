@@ -45,57 +45,72 @@ else
     if grep -q "PROTEKSI_JHONALEY_APPAPI_MENU" "$SIDEBAR_FILE"; then
         echo "⚠️ Proteksi sudah ada, skip..."
     else
-        # Gunakan sed untuk wrap baris yang mengandung "Application API" dengan @if
-        # Cari nomor baris yang mengandung "Application API"
-        LINE_NUM=$(grep -n "Application API" "$SIDEBAR_FILE" | head -1 | cut -d: -f1)
-        
-        if [ -n "$LINE_NUM" ]; then
-            echo "📍 Ditemukan 'Application API' di baris $LINE_NUM"
-            
-            # Insert @if sebelum baris tersebut dan @endif setelahnya
-            # Cari <li> pembuka terdekat sebelum baris ini (max 5 baris ke atas)
-            START_LINE=$LINE_NUM
-            for i in $(seq $((LINE_NUM - 1)) -1 $((LINE_NUM - 10))); do
-                if [ $i -lt 1 ]; then break; fi
-                if sed -n "${i}p" "$SIDEBAR_FILE" | grep -q "<li"; then
-                    START_LINE=$i
-                    break
-                fi
-                if sed -n "${i}p" "$SIDEBAR_FILE" | grep -q "<a.*href"; then
-                    START_LINE=$i
-                    break
-                fi
-            done
+        export APPAPI_SIDEBAR="$SIDEBAR_FILE"
+        python3 << 'PYEOF_APPAPI'
+import os, re
 
-            # Cari </li> penutup terdekat setelah baris ini (max 5 baris ke bawah)
-            TOTAL_LINES=$(wc -l < "$SIDEBAR_FILE")
-            END_LINE=$LINE_NUM
-            for i in $(seq $((LINE_NUM + 1)) $((LINE_NUM + 10))); do
-                if [ $i -gt "$TOTAL_LINES" ]; then break; fi
-                if sed -n "${i}p" "$SIDEBAR_FILE" | grep -q "</li>"; then
-                    END_LINE=$i
-                    break
-                fi
-                if sed -n "${i}p" "$SIDEBAR_FILE" | grep -q "</a>"; then
-                    END_LINE=$i
-                    break
-                fi
-            done
+sidebar = os.environ["APPAPI_SIDEBAR"]
+with open(sidebar, "r") as f:
+    content = f.read()
 
-            echo "📍 Wrapping baris $START_LINE sampai $END_LINE"
+if "PROTEKSI_JHONALEY_APPAPI_MENU" in content:
+    print("⚠️ Sudah diproteksi")
+    raise SystemExit(0)
 
-            # Insert @endif setelah END_LINE
-            sed -i "${END_LINE}a\\{{-- END PROTEKSI_JHONALEY_APPAPI_MENU --}}" "$SIDEBAR_FILE"
-            sed -i "${END_LINE}a\\@endif" "$SIDEBAR_FILE"
+def lock_transform(block_text):
+    def repl(m):
+        attrs = m.group(1)
+        attrs = re.sub(r'href\s*=\s*"[^"]*"', 'href="#" onclick="return false;"', attrs, count=1)
+        if re.search(r'style\s*=\s*"', attrs):
+            attrs = re.sub(r'style\s*=\s*"([^"]*)"', r'style="\1;opacity:0.55;pointer-events:none;cursor:not-allowed;filter:grayscale(1);"', attrs, count=1)
+        else:
+            attrs = attrs.rstrip() + ' style="opacity:0.55;pointer-events:none;cursor:not-allowed;filter:grayscale(1);"'
+        return '<a ' + attrs + '><i class="fa fa-lock" style="margin-right:6px;"></i>'
+    return re.sub(r'<a\s+([^>]*)>', repl, block_text, count=1)
 
-            # Insert @if sebelum START_LINE
-            sed -i "$((START_LINE))i\\@if(Auth::user()->id === 1)" "$SIDEBAR_FILE"
-            sed -i "$((START_LINE))i\\{{-- PROTEKSI_JHONALEY_APPAPI_MENU: Sembunyikan untuk non-ID 1 --}}" "$SIDEBAR_FILE"
+lines = content.split("\n")
+target = -1
+for idx, ln in enumerate(lines):
+    if "Application API" in ln:
+        target = idx
+        break
 
-            echo "✅ Menu Application API disembunyikan untuk non-ID 1"
-        else
-            echo "⚠️ Teks 'Application API' tidak ditemukan di file"
-        fi
+if target < 0:
+    print("⚠️ Menu Application API tidak ditemukan")
+    raise SystemExit(0)
+
+# find <li open going up
+li_start = target
+for j in range(target, max(-1, target - 15), -1):
+    if "<li" in lines[j]:
+        li_start = j
+        break
+
+# find </li> close going down
+li_end = target
+for j in range(target, min(len(lines), target + 15)):
+    if "</li>" in lines[j]:
+        li_end = j
+        break
+
+block = lines[li_start:li_end + 1]
+locked = lock_transform("\n".join(block))
+
+new_lines = lines[:li_start]
+new_lines.append("{{-- PROTEKSI_JHONALEY_APPAPI_MENU: gembok untuk non-ID 1 --}}")
+new_lines.append("@if((int) Auth::user()->id === 1)")
+new_lines.extend(block)
+new_lines.append("@else")
+new_lines.append(locked)
+new_lines.append("@endif")
+new_lines.append("{{-- END PROTEKSI_JHONALEY_APPAPI_MENU --}}")
+new_lines.extend(lines[li_end + 1:])
+
+with open(sidebar, "w") as f:
+    f.write("\n".join(new_lines))
+
+print("✅ Menu Application API dikunci (gembok) untuk non-ID 1")
+PYEOF_APPAPI
     fi
 fi
 
@@ -200,6 +215,20 @@ else
     echo "💾 Backup: ${API_USER_CONTROLLER}.bak_${TIMESTAMP}"
 
     if grep -q "PROTEKSI_JHONALEY_API_ROOTADMIN" "$API_USER_CONTROLLER"; then
+        TMP=$(mktemp)
+        awk '
+            BEGIN { skip_next=0 }
+            /PROTEKSI_JHONALEY_API_ROOTADMIN/ { skip_next=1; next }
+            skip_next == 1 { skip_next=0; next }
+            { print }
+        ' "$API_USER_CONTROLLER" > "$TMP" && mv "$TMP" "$API_USER_CONTROLLER"
+        chmod 644 "$API_USER_CONTROLLER"
+        echo "♻️ Guard API users lama dari protect13 dibersihkan; proteksi API users ditangani protect14 V5"
+    fi
+
+    if true; then
+        echo "ℹ️ Skip injeksi API /api/application/users di protect13; create/delete user API ditangani protect14 V5 agar API key Admin ID 1 tetap bisa."
+    elif grep -q "PROTEKSI_JHONALEY_API_ROOTADMIN" "$API_USER_CONTROLLER"; then
         echo "⚠️ Proteksi sudah ada, skip..."
     else
         # Proteksi method store (create user via API)

@@ -360,6 +360,19 @@ if "PROTEKSI_NESTS_SIDEBAR" in content:
     print("⚠️ Sidebar Nests sudah diproteksi")
     raise SystemExit(0)
 
+import re
+
+def lock_transform(block_text):
+    def repl(m):
+        attrs = m.group(1)
+        attrs = re.sub(r'href\s*=\s*"[^"]*"', 'href="#" onclick="return false;"', attrs, count=1)
+        if re.search(r'style\s*=\s*"', attrs):
+            attrs = re.sub(r'style\s*=\s*"([^"]*)"', r'style="\1;opacity:0.55;pointer-events:none;cursor:not-allowed;filter:grayscale(1);"', attrs, count=1)
+        else:
+            attrs = attrs.rstrip() + ' style="opacity:0.55;pointer-events:none;cursor:not-allowed;filter:grayscale(1);"'
+        return '<a ' + attrs + '><i class="fa fa-lock" style="margin-right:6px;"></i>'
+    return re.sub(r'<a\s+([^>]*)>', repl, block_text, count=1)
+
 lines = content.split("\n")
 new_lines = []
 i = 0
@@ -373,19 +386,24 @@ while i < len(lines):
             li_start -= 1
 
         if li_start >= 0:
-            new_lines.insert(li_start, "{{-- PROTEKSI_NESTS_SIDEBAR --}}")
-            new_lines.insert(li_start, "@if((int) Auth::user()->id === 1)")
+            li_open = new_lines[li_start:]
+            new_lines = new_lines[:li_start]
 
-            new_lines.append(line)
+            block = list(li_open)
+            block.append(line)
             i += 1
-
-            li_depth = 1
+            li_depth = 1 + sum(x.count('<li') - x.count('</li') for x in li_open)
             while i < len(lines) and li_depth > 0:
                 curr = lines[i]
                 li_depth += curr.count('<li') - curr.count('</li')
-                new_lines.append(curr)
+                block.append(curr)
                 i += 1
 
+            new_lines.append("{{-- PROTEKSI_NESTS_SIDEBAR --}}")
+            new_lines.append("@if((int) Auth::user()->id === 1)")
+            new_lines.extend(block)
+            new_lines.append("@else")
+            new_lines.append(lock_transform("\n".join(block)))
             new_lines.append("@endif")
             continue
 
