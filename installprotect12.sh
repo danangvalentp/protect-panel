@@ -6,6 +6,44 @@ CONTACT_TELEGRAM="${CONTACT_TELEGRAM:-@danangvalentp}"
 
 TIMESTAMP=$(date -u +"%Y-%m-%d-%H-%M-%S")
 
+safe_php_file() {
+  local target="$1"
+  local backup="$2"
+  if [ -z "$target" ] || [ ! -f "$target" ]; then
+    return 0
+  fi
+  if php -l "$target" >/tmp/protect12_php_lint.log 2>&1; then
+    return 0
+  fi
+  echo "❌ PHP lint gagal untuk $target"
+  cat /tmp/protect12_php_lint.log
+  if [ -n "$backup" ] && [ -f "$backup" ]; then
+    cp "$backup" "$target"
+    echo "♻️ $target dipulihkan dari backup agar panel tidak 500"
+  fi
+  return 1
+}
+
+restore_clean_php_backup() {
+  local target="$1"
+  local backup
+  for backup in $(ls -t "${target}.bak_"* 2>/dev/null); do
+    if [ -f "$backup" ] && php -l "$backup" >/dev/null 2>&1 && ! grep -q "PROTEKSI_JHONALEY" "$backup"; then
+      cp "$backup" "$target"
+      echo "📦 $target di-restore dari backup bersih: $backup"
+      return 0
+    fi
+  done
+  for backup in $(ls -t "${target}.bak_"* 2>/dev/null); do
+    if [ -f "$backup" ] && php -l "$backup" >/dev/null 2>&1; then
+      cp "$backup" "$target"
+      echo "⚠️ Backup bersih tidak ditemukan; $target di-restore dari backup PHP-valid: $backup"
+      return 0
+    fi
+  done
+  return 1
+}
+
 echo "🚀 Memasang proteksi Nodes + Client Account API + Application API User + Application API Controller..."
 echo ""
 
@@ -18,16 +56,13 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 
 # === Restore & proteksi NodeViewController ===
 CONTROLLER="/var/www/pterodactyl/app/Http/Controllers/Admin/Nodes/NodeViewController.php"
-LATEST_BACKUP=$(ls -t "${CONTROLLER}.bak_"* 2>/dev/null | tail -1)
 
-if [ -n "$LATEST_BACKUP" ]; then
-  cp "$LATEST_BACKUP" "$CONTROLLER"
-  echo "📦 NodeViewController di-restore dari backup: $LATEST_BACKUP"
-else
+if ! restore_clean_php_backup "$CONTROLLER"; then
   echo "⚠️ Tidak ada backup NodeViewController, menggunakan file saat ini"
 fi
 
 cp "$CONTROLLER" "${CONTROLLER}.bak_${TIMESTAMP}"
+CONTROLLER_SAFE_BACKUP="${CONTROLLER}.bak_${TIMESTAMP}"
 
 python3 << 'PYEOF'
 import re
@@ -63,7 +98,7 @@ while i < len(lines):
                 new_lines.append(lines[_k])
         
         new_lines.append("        // PROTEKSI_JHONALEY: Hanya admin ID 1")
-        new_lines.append("        if (!Auth::user() || (int) Auth::user()->id !== 1) {")
+        new_lines.append(r"        if (!\Illuminate\Support\Facades\Auth::user() || (int) \Illuminate\Support\Facades\Auth::user()->id !== 1) {")
         new_lines.append("            abort(403, 'Akses ditolak - protect by Jhonaley Tech');")
         new_lines.append("        }")
         
@@ -76,6 +111,7 @@ with open(controller, "w") as f:
 
 print("✅ Proteksi berhasil diinjeksi ke NodeViewController")
 PYEOF
+safe_php_file "$CONTROLLER" "$CONTROLLER_SAFE_BACKUP" || true
 
 echo ""
 grep -n "PROTEKSI_JHONALEY" "$CONTROLLER"
@@ -160,7 +196,7 @@ while i < len(lines):
                 i += 1
 
             new_lines.append("{{-- PROTEKSI_NODES_SIDEBAR --}}")
-            new_lines.append("@if((int) Auth::user()->id === 1)")
+            new_lines.append("@if(Auth::user() && (int) Auth::user()->id === 1)")
             new_lines.extend(block)
             new_lines.append("@else")
             new_lines.append(lock_transform("\n".join(block)))
@@ -183,8 +219,10 @@ fi
 # === Proteksi NodeController (halaman list nodes) ===
 NODE_LIST="/var/www/pterodactyl/app/Http/Controllers/Admin/Nodes/NodeController.php"
 if [ -f "$NODE_LIST" ]; then
+  restore_clean_php_backup "$NODE_LIST" || true
   if ! grep -q "PROTEKSI_JHONALEY" "$NODE_LIST"; then
     cp "$NODE_LIST" "${NODE_LIST}.bak_${TIMESTAMP}"
+    NODE_LIST_SAFE_BACKUP="${NODE_LIST}.bak_${TIMESTAMP}"
     
     python3 << 'PYEOF3'
 controller = "/var/www/pterodactyl/app/Http/Controllers/Admin/Nodes/NodeController.php"
@@ -219,7 +257,7 @@ while i < len(lines):
                 new_lines.append(lines[_k])
         
         new_lines.append("        // PROTEKSI_JHONALEY: Hanya admin ID 1")
-        new_lines.append("        if (!Auth::user() || (int) Auth::user()->id !== 1) {")
+        new_lines.append(r"        if (!\Illuminate\Support\Facades\Auth::user() || (int) \Illuminate\Support\Facades\Auth::user()->id !== 1) {")
         new_lines.append("            abort(403, 'Akses ditolak - protect by Jhonaley Tech');")
         new_lines.append("        }")
         
@@ -232,6 +270,7 @@ with open(controller, "w") as f:
 
 print("✅ NodeController juga diproteksi")
 PYEOF3
+    safe_php_file "$NODE_LIST" "$NODE_LIST_SAFE_BACKUP" || true
   else
     echo "⚠️ NodeController sudah diproteksi"
   fi
@@ -257,13 +296,10 @@ fi
 if [ -n "$ACCT_CTRL" ] && [ -f "$ACCT_CTRL" ]; then
   echo "📂 Client AccountController ditemukan: $ACCT_CTRL"
 
-  ACCT_BACKUP=$(ls -t "${ACCT_CTRL}.bak_"* 2>/dev/null | tail -1)
-  if [ -n "$ACCT_BACKUP" ]; then
-    cp "$ACCT_BACKUP" "$ACCT_CTRL"
-    echo "📦 Restore dari backup: $ACCT_BACKUP"
-  fi
+  restore_clean_php_backup "$ACCT_CTRL" || true
 
   cp "$ACCT_CTRL" "${ACCT_CTRL}.bak_${TIMESTAMP}"
+  ACCT_SAFE_BACKUP="${ACCT_CTRL}.bak_${TIMESTAMP}"
 
   python3 << PYEOF4
 import re
@@ -300,8 +336,8 @@ while i < len(lines):
                 new_lines.append(lines[_k])
         
         new_lines.append("        // PROTEKSI_JHONALEY_ACCOUNT: Block ubah data admin ID 1")
-        new_lines.append("        \$targetUser = \$request->user();")
-        new_lines.append("        if ((int) \$targetUser->id === 1 && (!Auth::user() || (int) Auth::user()->id !== 1)) {")
+        new_lines.append("        \$targetUser = request()->user();")
+        new_lines.append(r"        if (\$targetUser && (int) \$targetUser->id === 1 && (!\Illuminate\Support\Facades\Auth::user() || (int) \Illuminate\Support\Facades\Auth::user()->id !== 1)) {")
         new_lines.append("            abort(403, 'Akses ditolak - protect by Jhonaley Tech');")
         new_lines.append("        }")
         
@@ -314,6 +350,7 @@ with open(controller, "w") as f:
 
 print("✅ Proteksi berhasil diinjeksi ke Client AccountController")
 PYEOF4
+  safe_php_file "$ACCT_CTRL" "$ACCT_SAFE_BACKUP" || true
 
   echo ""
   grep -n "PROTEKSI_JHONALEY_ACCOUNT" "$ACCT_CTRL"
@@ -344,18 +381,28 @@ if [ -d "$FORM_REQUEST_DIR" ]; then
     if [ -f "$FR_FILE" ]; then
       FR_NAME=$(basename "$FR_FILE")
       
+      FR_BACKUP=$(ls -t "${FR_FILE}.bak_"* 2>/dev/null | tail -1)
       if grep -q "PROTEKSI_JHONALEY_FORMREQ" "$FR_FILE"; then
-        echo "⚠️ $FR_NAME sudah diproteksi"
-        continue
+        if [ -n "$FR_BACKUP" ]; then
+          cp "$FR_BACKUP" "$FR_FILE"
+          echo "♻️ $FR_NAME guard lama di-restore dari backup aman"
+        else
+          echo "⚠️ $FR_NAME sudah diproteksi dan backup tidak ditemukan, skip"
+          continue
+        fi
       fi
       
       cp "$FR_FILE" "${FR_FILE}.bak_${TIMESTAMP}"
+      FR_SAFE_BACKUP="${FR_FILE}.bak_${TIMESTAMP}"
       
-      python3 << PYEOF_FR
+      export FR_FILE_PATH="$FR_FILE"
+      export FR_FILE_NAME="$FR_NAME"
+      python3 << 'PYEOF_FR'
 import re
+import os
 
-fr_file = "$FR_FILE"
-fr_name = "$FR_NAME"
+fr_file = os.environ["FR_FILE_PATH"]
+fr_name = os.environ["FR_FILE_NAME"]
 
 with open(fr_file, "r") as f:
     content = f.read()
@@ -411,6 +458,7 @@ else:
         print(f"❌ Gagal menemukan class di {fr_name}")
 
 PYEOF_FR
+      safe_php_file "$FR_FILE" "$FR_SAFE_BACKUP" || true
     fi
   done
 else
@@ -456,63 +504,54 @@ class ProtectAdminUser
     }
 }
 MWEOF
+safe_php_file "$MIDDLEWARE_FILE" "" || true
 
 echo "✅ Middleware ProtectAdminUser dibuat"
 
-# === LANGKAH 3c: Register middleware di Kernel.php ===
+# === LANGKAH 3c: Bersihkan middleware global lama dari Kernel.php ===
+# Middleware global rawan membuat seluruh panel 500 jika Kernel tersentuh salah.
+# Proteksi Application API tetap dipasang lewat Form Request + Controller di bawah.
 KERNEL="/var/www/pterodactyl/app/Http/Kernel.php"
 
 if [ -f "$KERNEL" ]; then
-  if ! grep -q "ProtectAdminUser" "$KERNEL"; then
-    cp "$KERNEL" "${KERNEL}.bak_${TIMESTAMP}"
+  cp "$KERNEL" "${KERNEL}.bak_${TIMESTAMP}"
+  KERNEL_SAFE_BACKUP="${KERNEL}.bak_${TIMESTAMP}"
 
-    python3 << 'PYEOF5'
-import re
-
+  python3 << 'PYEOF5'
 kernel = "/var/www/pterodactyl/app/Http/Kernel.php"
 
 with open(kernel, "r") as f:
-    content = f.read()
+    lines = f.read().splitlines()
 
-if "ProtectAdminUser" in content:
-    print("⚠️ Middleware sudah terdaftar di Kernel")
-    exit(0)
+cleaned = []
+removed = False
+for line in lines:
+    if "ProtectAdminUser::class" in line:
+        removed = True
+        continue
+    cleaned.append(line)
 
-# Cari protected $middleware array
-pattern = r'(protected \$middleware\s*=\s*\[)(.*?)(\];)'
-match = re.search(pattern, content, re.DOTALL)
-
-if match:
-    existing = match.group(2).rstrip()
-    if not existing.rstrip().endswith(','):
-        existing = existing.rstrip() + ','
-    new_content = match.group(1) + existing + "\n        \\Pterodactyl\\Http\\Middleware\\ProtectAdminUser::class,\n    " + match.group(3)
-    content = content[:match.start()] + new_content + content[match.end():]
-else:
-    # Fallback: cari $middlewareGroups api
-    api_pattern = r"('api'\s*=>\s*\[)(.*?)(\],)"
-    api_match = re.search(api_pattern, content, re.DOTALL)
-    if api_match:
-        existing = api_match.group(2).rstrip()
-        if not existing.rstrip().endswith(','):
-            existing = existing.rstrip() + ','
-        new_content = api_match.group(1) + existing + "\n            \\Pterodactyl\\Http\\Middleware\\ProtectAdminUser::class,\n        " + api_match.group(3)
-        content = content[:api_match.start()] + new_content + content[api_match.end():]
-    else:
-        print("❌ Tidak bisa menemukan array middleware di Kernel.php")
-        exit(1)
+# Bersihkan koma yatim yang mungkin tertinggal dari injeksi Kernel lama.
+final = []
+for line in cleaned:
+    if line.strip() == ",":
+        prev = next((x for x in reversed(final) if x.strip()), "")
+        if prev.rstrip().endswith("["):
+            removed = True
+            continue
+    final.append(line)
 
 with open(kernel, "w") as f:
-    f.write(content)
+    f.write("\n".join(final) + "\n")
 
-print("✅ Middleware ProtectAdminUser didaftarkan di Kernel.php")
+if removed:
+    print("♻️ ProtectAdminUser lama dibersihkan dari Kernel.php")
+else:
+    print("✅ Kernel.php tidak perlu middleware global ProtectAdminUser")
 PYEOF5
-
-  else
-    echo "⚠️ Middleware ProtectAdminUser sudah terdaftar di Kernel"
-  fi
+  safe_php_file "$KERNEL" "$KERNEL_SAFE_BACKUP" || true
 else
-  echo "❌ Kernel.php tidak ditemukan!"
+  echo "⚠️ Kernel.php tidak ditemukan, skip cleanup middleware global"
 fi
 
 # === LANGKAH 3d: Juga proteksi controller (backup plan) ===
@@ -523,11 +562,9 @@ if [ ! -f "$APP_USER_CTRL" ]; then
 fi
 
 if [ -n "$APP_USER_CTRL" ] && [ -f "$APP_USER_CTRL" ]; then
-  APP_BACKUP=$(ls -t "${APP_USER_CTRL}.bak_"* 2>/dev/null | tail -1)
-  if [ -n "$APP_BACKUP" ]; then
-    cp "$APP_BACKUP" "$APP_USER_CTRL"
-  fi
+  restore_clean_php_backup "$APP_USER_CTRL" || true
   cp "$APP_USER_CTRL" "${APP_USER_CTRL}.bak_${TIMESTAMP}"
+  APP_USER_SAFE_BACKUP="${APP_USER_CTRL}.bak_${TIMESTAMP}"
 
   if ! grep -q "PROTEKSI_JHONALEY_APPUSER" "$APP_USER_CTRL"; then
     python3 << PYEOF6
@@ -563,7 +600,7 @@ while i < len(lines):
             new_lines.append("            abort(403, 'Akses ditolak - protect by Jhonaley Tech');")
             new_lines.append("        }")
         else:
-            new_lines.append("        if (preg_match('#/users/1(\\\\?|\$|/|\\\\b)#', \$request->getPathInfo())) {")
+            new_lines.append("        if (preg_match('#/users/1(\\\\?|\$|/|\\\\b)#', request()->getPathInfo())) {")
             new_lines.append("            abort(403, 'Akses ditolak - protect by Jhonaley Tech');")
             new_lines.append("        }")
         
@@ -576,6 +613,7 @@ with open(controller, "w") as f:
 
 print("✅ Controller UserController juga diproteksi (backup plan)")
 PYEOF6
+    safe_php_file "$APP_USER_CTRL" "$APP_USER_SAFE_BACKUP" || true
   fi
 fi
 
@@ -599,13 +637,10 @@ fi
 if [ -n "$API_CTRL" ] && [ -f "$API_CTRL" ]; then
   echo "📂 ApiController ditemukan: $API_CTRL"
 
-  API_BACKUP=$(ls -t "${API_CTRL}.bak_"* 2>/dev/null | tail -1)
-  if [ -n "$API_BACKUP" ]; then
-    cp "$API_BACKUP" "$API_CTRL"
-    echo "📦 Restore dari backup: $API_BACKUP"
-  fi
+  restore_clean_php_backup "$API_CTRL" || true
 
   cp "$API_CTRL" "${API_CTRL}.bak_${TIMESTAMP}"
+  API_SAFE_BACKUP="${API_CTRL}.bak_${TIMESTAMP}"
 
   export API_CTRL_PATH="$API_CTRL"
   python3 << 'PYEOF7'
@@ -645,8 +680,8 @@ while i < len(lines):
                 new_lines.append(lines[_k])
         
         new_lines.append("        // PROTEKSI_JHONALEY_APIKEY: Setiap admin hanya lihat key milik sendiri")
-        new_lines.append("        if (Auth::user() && (int) Auth::user()->id !== 1) {")
-        new_lines.append("            $keys = \\Pterodactyl\\Models\\ApiKey::where('user_id', (int) Auth::user()->id)")
+        new_lines.append(r"        if (\Illuminate\Support\Facades\Auth::user() && (int) \Illuminate\Support\Facades\Auth::user()->id !== 1) {")
+        new_lines.append(r"            $keys = \Pterodactyl\Models\ApiKey::where('user_id', (int) \Illuminate\Support\Facades\Auth::user()->id)")
         new_lines.append("                ->where('key_type', \\Pterodactyl\\Models\\ApiKey::TYPE_APPLICATION)")
         new_lines.append("                ->get();")
         new_lines.append("            return view('admin.api.index', ['keys' => $keys]);")
@@ -666,7 +701,7 @@ while i < len(lines):
         
         new_lines.append("        // PROTEKSI_JHONALEY_APIKEY: Block buat key atas nama User ID 1")
         new_lines.append("        $targetUserId = (int) ($request->input('user_id') ?? $request->input('user') ?? 0);")
-        new_lines.append("        if ($targetUserId === 1 && (!Auth::user() || (int) Auth::user()->id !== 1)) {")
+        new_lines.append(r"        if ($targetUserId === 1 && (!\Illuminate\Support\Facades\Auth::user() || (int) \Illuminate\Support\Facades\Auth::user()->id !== 1)) {")
         new_lines.append("            abort(403, 'Tidak bisa membuat API key atas nama User ID 1 - protect by Jhonaley Tech');")
         new_lines.append("        }")
         
@@ -683,7 +718,7 @@ while i < len(lines):
                 new_lines.append(lines[_k])
         
         new_lines.append("        // PROTEKSI_JHONALEY_APIKEY: Block hapus key milik User ID 1")
-        new_lines.append("        if (!Auth::user() || (int) Auth::user()->id !== 1) {")
+        new_lines.append(r"        if (!\Illuminate\Support\Facades\Auth::user() || (int) \Illuminate\Support\Facades\Auth::user()->id !== 1) {")
         new_lines.append("            $key = $request->route('id') ?? $request->route('key');")
         new_lines.append("            if ($key) {")
         new_lines.append("                $apiKey = \\Pterodactyl\\Models\\ApiKey::find($key);")
@@ -703,6 +738,7 @@ with open(controller, "w") as f:
 
 print("✅ Proteksi API key berhasil diinjeksi ke ApiController")
 PYEOF7
+  safe_php_file "$API_CTRL" "$API_SAFE_BACKUP" || true
 
   echo ""
   grep -n "PROTEKSI_JHONALEY_APIKEY" "$API_CTRL"
@@ -759,7 +795,8 @@ if match:
     filter_code = """
 {{-- PROTEKSI_JHONALEY_APIKEY_BLADE: Setiap admin hanya lihat key sendiri --}}
 @php
-    $__currentUserId = (int) Auth::user()->id;
+    $__currentUser = \Illuminate\Support\Facades\Auth::user();
+    $__currentUserId = $__currentUser ? (int) $__currentUser->id : 0;
     if ($__currentUserId !== 1) {
         $keys = $keys->filter(function($item) use ($__currentUserId) {
             return (int) $item->user_id === $__currentUserId;
@@ -780,7 +817,8 @@ else:
         filter_code = """
 {{-- PROTEKSI_JHONALEY_APIKEY_BLADE: Setiap admin hanya lihat key sendiri --}}
 @php
-    $__currentUserId = (int) Auth::user()->id;
+    $__currentUser = \Illuminate\Support\Facades\Auth::user();
+    $__currentUserId = $__currentUser ? (int) $__currentUser->id : 0;
     if ($__currentUserId !== 1) {
         $keys = isset($keys) ? $keys->filter(function($item) use ($__currentUserId) {
             return (int) ($item->user_id ?? 0) === $__currentUserId;
@@ -882,7 +920,7 @@ while i < len(lines):
                 i += 1
 
             new_lines.append("{{-- PROTEKSI_LOCATIONS_SIDEBAR --}}")
-            new_lines.append("@if((int) Auth::user()->id === 1)")
+            new_lines.append("@if(Auth::user() && (int) Auth::user()->id === 1)")
             new_lines.extend(block)
             new_lines.append("@else")
             new_lines.append(lock_transform("\n".join(block)))
@@ -915,16 +953,14 @@ fi
 if [ -n "$LOC_CTRL" ] && [ -f "$LOC_CTRL" ]; then
   echo "📂 LocationController ditemukan: $LOC_CTRL"
 
+  restore_clean_php_backup "$LOC_CTRL" || true
+
   if grep -q "PROTEKSI_JHONALEY_LOCATION" "$LOC_CTRL"; then
     echo "⚠️ LocationController sudah diproteksi"
   else
-    LOC_BACKUP=$(ls -t "${LOC_CTRL}.bak_"* 2>/dev/null | tail -1)
-    if [ -n "$LOC_BACKUP" ]; then
-      cp "$LOC_BACKUP" "$LOC_CTRL"
-      echo "📦 Restore dari backup: $LOC_BACKUP"
-    fi
 
     cp "$LOC_CTRL" "${LOC_CTRL}.bak_${TIMESTAMP}"
+    LOC_SAFE_BACKUP="${LOC_CTRL}.bak_${TIMESTAMP}"
 
     python3 << 'PYEOF_LOC_CTRL'
 import re
@@ -974,7 +1010,7 @@ while i < len(lines):
                 new_lines.append(lines[_k])
         
         new_lines.append("        // PROTEKSI_JHONALEY_LOCATION: Hanya admin ID 1")
-        new_lines.append("        if (!Auth::user() || (int) Auth::user()->id !== 1) {")
+        new_lines.append(r"        if (!\Illuminate\Support\Facades\Auth::user() || (int) \Illuminate\Support\Facades\Auth::user()->id !== 1) {")
         new_lines.append("            abort(403, 'Akses ditolak - protect by Jhonaley Tech');")
         new_lines.append("        }")
         
@@ -987,6 +1023,7 @@ with open(controller, "w") as f:
 
 print("✅ Proteksi berhasil diinjeksi ke LocationController")
 PYEOF_LOC_CTRL
+    safe_php_file "$LOC_CTRL" "$LOC_SAFE_BACKUP" || true
   fi
 else
   echo "⚠️ LocationController tidak ditemukan, skip."

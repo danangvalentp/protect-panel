@@ -26,11 +26,25 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "📦 BAGIAN 1: Sembunyikan menu Application API di sidebar"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-# Cari file yang mengandung "Application API" di views
-SIDEBAR_FILE=$(grep -rl "Application API" "$PANEL_DIR/resources/views/" 2>/dev/null | head -1)
+# Cari file sidebar ASLI, jangan pernah ambil backup .bak/.bak_pm.
+SIDEBAR_FILE=""
+for CANDIDATE in \
+    "$PANEL_DIR/resources/views/layouts/admin.blade.php" \
+    "$PANEL_DIR/resources/views/partials/admin/sidebar.blade.php"; do
+    if [ -f "$CANDIDATE" ] && grep -Eq "Application API|admin\.api|api\.index|route\('admin\.api" "$CANDIDATE" 2>/dev/null; then
+        SIDEBAR_FILE="$CANDIDATE"
+        break
+    fi
+done
 
 if [ -z "$SIDEBAR_FILE" ]; then
-    echo "⚠️ Tidak menemukan menu 'Application API' di views, mencoba layout admin..."
+    SIDEBAR_FILE=$(grep -RIlE --include='*.blade.php' "Application API|admin\.api|api\.index|route\('admin\.api" "$PANEL_DIR/resources/views/" 2>/dev/null \
+        | grep -vE '\.bak($|_)|\.bak_|bak_pm|/storage/framework/' \
+        | head -1)
+fi
+
+if [ -z "$SIDEBAR_FILE" ]; then
+    echo "⚠️ Tidak menemukan menu Application API di file blade asli, mencoba layout admin default..."
     SIDEBAR_FILE="$PANEL_DIR/resources/views/layouts/admin.blade.php"
 fi
 
@@ -97,13 +111,14 @@ def lock_transform(block_text):
 
 lines = content.split("\n")
 target = -1
+patterns = ("Application API", "admin.api", "api.index", "route('admin.api", 'route("admin.api')
 for idx, ln in enumerate(lines):
-    if "Application API" in ln:
+    if any(p in ln for p in patterns):
         target = idx
         break
 
 if target < 0:
-    print("⚠️ Menu Application API tidak ditemukan")
+    print("⚠️ Menu Application API tidak ditemukan di file asli")
     raise SystemExit(0)
 
 # find <li open going up
@@ -125,7 +140,7 @@ locked = lock_transform("\n".join(block))
 
 new_lines = lines[:li_start]
 new_lines.append("{{-- PROTEKSI_JHONALEY_APPAPI_MENU: gembok untuk non-ID 1 --}}")
-new_lines.append("@if((int) Auth::user()->id === 1)")
+new_lines.append("@if(Auth::user() && (int) Auth::user()->id === 1)")
 new_lines.extend(block)
 new_lines.append("@else")
 new_lines.append(locked)
