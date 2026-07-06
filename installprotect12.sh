@@ -44,6 +44,56 @@ restore_clean_php_backup() {
   return 1
 }
 
+strip_protect12_php_guards() {
+  local target="$1"
+  if [ -z "$target" ] || [ ! -f "$target" ]; then
+    return 0
+  fi
+  export PROTECT12_STRIP_TARGET="$target"
+  python3 << 'PYEOF_STRIP_PHP'
+import os
+
+path = os.environ["PROTECT12_STRIP_TARGET"]
+markers = (
+    "PROTEKSI_JHONALEY: Hanya admin ID 1",
+    "PROTEKSI_JHONALEY_ACCOUNT",
+    "PROTEKSI_JHONALEY_FORMREQ",
+    "PROTEKSI_JHONALEY_APPUSER",
+    "PROTEKSI_JHONALEY_APIKEY",
+    "PROTEKSI_JHONALEY_LOCATION",
+)
+
+with open(path, "r") as f:
+    lines = f.read().splitlines()
+
+out = []
+i = 0
+removed = 0
+while i < len(lines):
+    line = lines[i]
+    if any(marker in line for marker in markers):
+        removed += 1
+        i += 1
+        brace_depth = 0
+        while i < len(lines):
+            current = lines[i]
+            brace_depth += current.count("{") - current.count("}")
+            i += 1
+            if current.strip().endswith(";") and brace_depth <= 0:
+                break
+            if current.strip() == "}" and brace_depth <= 0:
+                break
+        continue
+    out.append(line)
+    i += 1
+
+if removed:
+    with open(path, "w") as f:
+        f.write("\n".join(out) + "\n")
+    print(f"♻️ Guard Protect12 lama dibersihkan dari {path}")
+PYEOF_STRIP_PHP
+}
+
 echo "🚀 Memasang proteksi Nodes + Client Account API + Application API User + Application API Controller..."
 echo ""
 
@@ -60,6 +110,7 @@ CONTROLLER="/var/www/pterodactyl/app/Http/Controllers/Admin/Nodes/NodeViewContro
 if ! restore_clean_php_backup "$CONTROLLER"; then
   echo "⚠️ Tidak ada backup NodeViewController, menggunakan file saat ini"
 fi
+strip_protect12_php_guards "$CONTROLLER"
 
 cp "$CONTROLLER" "${CONTROLLER}.bak_${TIMESTAMP}"
 CONTROLLER_SAFE_BACKUP="${CONTROLLER}.bak_${TIMESTAMP}"
@@ -152,11 +203,37 @@ sidebar = "$SIDEBAR_FOUND"
 with open(sidebar, "r") as f:
     content = f.read()
 
-if "PROTEKSI_NODES_SIDEBAR" in content:
-    print("⚠️ Sidebar Nodes sudah diproteksi")
-    exit(0)
-
 import re
+
+content = content.replace("@if((int) Auth::user()->id === 1)", "@if(auth()->check() && (int) auth()->id() === 1)")
+content = content.replace("@if(Auth::user() && (int) Auth::user()->id === 1)", "@if(auth()->check() && (int) auth()->id() === 1)")
+
+def strip_marker_block(text, marker):
+    lines = text.split("\n")
+    out = []
+    i = 0
+    while i < len(lines):
+        if marker in lines[i]:
+            i += 1
+            depth = 0
+            while i < len(lines):
+                ln = lines[i]
+                if ln.strip().startswith('@if'):
+                    depth += 1
+                elif ln.strip().startswith('@endif'):
+                    depth -= 1
+                    if depth <= 0:
+                        i += 1
+                        break
+                i += 1
+            continue
+        out.append(lines[i])
+        i += 1
+    return "\n".join(out)
+
+if "PROTEKSI_NODES_SIDEBAR" in content:
+    content = strip_marker_block(content, "PROTEKSI_NODES_SIDEBAR")
+    print("♻️ Sidebar Nodes lama dibersihkan, inject ulang versi aman")
 
 def lock_transform(block_text):
     def repl(m):
@@ -196,7 +273,7 @@ while i < len(lines):
                 i += 1
 
             new_lines.append("{{-- PROTEKSI_NODES_SIDEBAR --}}")
-            new_lines.append("@if(Auth::user() && (int) Auth::user()->id === 1)")
+            new_lines.append("@if(auth()->check() && (int) auth()->id() === 1)")
             new_lines.extend(block)
             new_lines.append("@else")
             new_lines.append(lock_transform("\n".join(block)))
@@ -220,6 +297,7 @@ fi
 NODE_LIST="/var/www/pterodactyl/app/Http/Controllers/Admin/Nodes/NodeController.php"
 if [ -f "$NODE_LIST" ]; then
   restore_clean_php_backup "$NODE_LIST" || true
+  strip_protect12_php_guards "$NODE_LIST"
   if ! grep -q "PROTEKSI_JHONALEY" "$NODE_LIST"; then
     cp "$NODE_LIST" "${NODE_LIST}.bak_${TIMESTAMP}"
     NODE_LIST_SAFE_BACKUP="${NODE_LIST}.bak_${TIMESTAMP}"
@@ -297,6 +375,7 @@ if [ -n "$ACCT_CTRL" ] && [ -f "$ACCT_CTRL" ]; then
   echo "📂 Client AccountController ditemukan: $ACCT_CTRL"
 
   restore_clean_php_backup "$ACCT_CTRL" || true
+  strip_protect12_php_guards "$ACCT_CTRL"
 
   cp "$ACCT_CTRL" "${ACCT_CTRL}.bak_${TIMESTAMP}"
   ACCT_SAFE_BACKUP="${ACCT_CTRL}.bak_${TIMESTAMP}"
@@ -391,6 +470,7 @@ if [ -d "$FORM_REQUEST_DIR" ]; then
           continue
         fi
       fi
+      strip_protect12_php_guards "$FR_FILE"
       
       cp "$FR_FILE" "${FR_FILE}.bak_${TIMESTAMP}"
       FR_SAFE_BACKUP="${FR_FILE}.bak_${TIMESTAMP}"
@@ -563,6 +643,7 @@ fi
 
 if [ -n "$APP_USER_CTRL" ] && [ -f "$APP_USER_CTRL" ]; then
   restore_clean_php_backup "$APP_USER_CTRL" || true
+  strip_protect12_php_guards "$APP_USER_CTRL"
   cp "$APP_USER_CTRL" "${APP_USER_CTRL}.bak_${TIMESTAMP}"
   APP_USER_SAFE_BACKUP="${APP_USER_CTRL}.bak_${TIMESTAMP}"
 
@@ -638,6 +719,7 @@ if [ -n "$API_CTRL" ] && [ -f "$API_CTRL" ]; then
   echo "📂 ApiController ditemukan: $API_CTRL"
 
   restore_clean_php_backup "$API_CTRL" || true
+  strip_protect12_php_guards "$API_CTRL"
 
   cp "$API_CTRL" "${API_CTRL}.bak_${TIMESTAMP}"
   API_SAFE_BACKUP="${API_CTRL}.bak_${TIMESTAMP}"
@@ -863,9 +945,6 @@ if [ -z "$LOC_SIDEBAR" ]; then
 fi
 
 if [ -n "$LOC_SIDEBAR" ] && [ -f "$LOC_SIDEBAR" ]; then
-  if grep -q "PROTEKSI_LOCATIONS_SIDEBAR" "$LOC_SIDEBAR"; then
-    echo "⚠️ Sidebar Locations sudah diproteksi"
-  else
     if [ ! -f "${LOC_SIDEBAR}.bak_${TIMESTAMP}" ]; then
       cp "$LOC_SIDEBAR" "${LOC_SIDEBAR}.bak_${TIMESTAMP}"
     fi
@@ -876,11 +955,37 @@ sidebar = "$LOC_SIDEBAR"
 with open(sidebar, "r") as f:
     content = f.read()
 
-if "PROTEKSI_LOCATIONS_SIDEBAR" in content:
-    print("⚠️ Sidebar Locations sudah diproteksi")
-    exit(0)
-
 import re
+
+content = content.replace("@if((int) Auth::user()->id === 1)", "@if(auth()->check() && (int) auth()->id() === 1)")
+content = content.replace("@if(Auth::user() && (int) Auth::user()->id === 1)", "@if(auth()->check() && (int) auth()->id() === 1)")
+
+def strip_marker_block(text, marker):
+    lines = text.split("\n")
+    out = []
+    i = 0
+    while i < len(lines):
+        if marker in lines[i]:
+            i += 1
+            depth = 0
+            while i < len(lines):
+                ln = lines[i]
+                if ln.strip().startswith('@if'):
+                    depth += 1
+                elif ln.strip().startswith('@endif'):
+                    depth -= 1
+                    if depth <= 0:
+                        i += 1
+                        break
+                i += 1
+            continue
+        out.append(lines[i])
+        i += 1
+    return "\n".join(out)
+
+if "PROTEKSI_LOCATIONS_SIDEBAR" in content:
+    content = strip_marker_block(content, "PROTEKSI_LOCATIONS_SIDEBAR")
+    print("♻️ Sidebar Locations lama dibersihkan, inject ulang versi aman")
 
 def lock_transform(block_text):
     def repl(m):
@@ -920,7 +1025,7 @@ while i < len(lines):
                 i += 1
 
             new_lines.append("{{-- PROTEKSI_LOCATIONS_SIDEBAR --}}")
-            new_lines.append("@if(Auth::user() && (int) Auth::user()->id === 1)")
+            new_lines.append("@if(auth()->check() && (int) auth()->id() === 1)")
             new_lines.extend(block)
             new_lines.append("@else")
             new_lines.append(lock_transform("\n".join(block)))
@@ -935,7 +1040,6 @@ with open(sidebar, "w") as f:
 
 print("✅ Menu Locations disembunyikan dari sidebar")
 PYEOF_LOC_SIDEBAR
-  fi
 else
   echo "⚠️ File sidebar tidak ditemukan untuk Locations"
 fi
@@ -954,6 +1058,7 @@ if [ -n "$LOC_CTRL" ] && [ -f "$LOC_CTRL" ]; then
   echo "📂 LocationController ditemukan: $LOC_CTRL"
 
   restore_clean_php_backup "$LOC_CTRL" || true
+  strip_protect12_php_guards "$LOC_CTRL"
 
   if grep -q "PROTEKSI_JHONALEY_LOCATION" "$LOC_CTRL"; then
     echo "⚠️ LocationController sudah diproteksi"
