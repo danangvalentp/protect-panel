@@ -1,8 +1,8 @@
 #!/bin/bash
 
-BRAND_NAME="${BRAND_NAME:-Jhonaley Tech}"
+BRAND_NAME="${BRAND_NAME:-Jhonaley Store}"
 BRAND_TEXT="${BRAND_TEXT:-Protect By Jhonaley}"
-CONTACT_TELEGRAM="${CONTACT_TELEGRAM:-@danangvalentp}"
+CONTACT_TELEGRAM="${CONTACT_TELEGRAM:-@JhoanleystoreId}"
 CONTACT_TELEGRAM_2="${CONTACT_TELEGRAM_2:-@jhonaleytesti3}"
 BRAND_LABEL="${BRAND_LABEL:-$BRAND_NAME}"
 
@@ -130,7 +130,7 @@ cat > "$INDEX_FILE" << 'EOF'
                     </p>
                     <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-family:'JetBrains Mono',monospace;">
                         <span style="font-size:10px;color:#a3a3a3;text-transform:uppercase;letter-spacing:1px;font-weight:700;">&gt; PROTECTED_BY:</span>
-                        <span style="background:#dc2626;color:#0a0a0a;border:1.5px solid #0a0a0a;padding:3px 9px;font-size:10px;font-weight:900;letter-spacing:1px;">@danangvalentp</span>
+                        <span style="background:#dc2626;color:#0a0a0a;border:1.5px solid #0a0a0a;padding:3px 9px;font-size:10px;font-weight:900;letter-spacing:1px;">@JhoanleystoreId</span>
                         <span style="background:#fafafa;color:#0a0a0a;border:1.5px solid #0a0a0a;padding:3px 9px;font-size:10px;font-weight:900;letter-spacing:1px;">@jhonaleytesti3</span>
                         <span style="background:#0a0a0a;color:#fbbf24;border:1.5px solid #fbbf24;padding:3px 9px;font-size:10px;font-weight:900;letter-spacing:1px;text-transform:uppercase;">__BRAND_LABEL__</span>
                     </div>
@@ -169,7 +169,7 @@ cat > "$INDEX_FILE" << 'EOF'
             @if((int) auth()->user()->id !== 1)
             $('a[href*="/admin/servers/view/"]').on('click', function(e) {
                 e.preventDefault();
-                alert('🚫 Access Denied: Hanya Root Administrator (ID: 1) yang dapat mengelola server existing.\n\n✅ Anda masih bisa membuat server baru dengan tombol "Create New"\n\nProtected by: @danangvalentpl');
+                alert('🚫 Access Denied: Hanya Root Administrator (ID: 1) yang dapat mengelola server existing.\n\n✅ Anda masih bisa membuat server baru dengan tombol "Create New"\n\nProtected by: @JhoanleystoreId');
             });
             @endif
         });
@@ -182,6 +182,7 @@ sed -i "s|@jhonaleytesti3|${CONTACT_TELEGRAM_2}|g" "$INDEX_FILE" 2>/dev/null || 
 sed -i "s|Jhonaley Tech|${BRAND_NAME}|g" "$INDEX_FILE" 2>/dev/null || true
 sed -i "s|@danangvalentp|${CONTACT_TELEGRAM}|g" "$INDEX_FILE" 2>/dev/null || true
 sed -i "s|@danangvalentpl|${CONTACT_TELEGRAM}|g" "$INDEX_FILE" 2>/dev/null || true
+sed -i "s|@JhoanleystoreId|${CONTACT_TELEGRAM}|g" "$INDEX_FILE" 2>/dev/null || true
 
 chmod 644 "$INDEX_FILE"
 
@@ -192,4 +193,4 @@ echo "🎉 PROTEKSI BERHASIL DIPASANG!"
 echo "✅ Admin ID 1: Bisa akses semua (server list, view, dan management)"
 echo "✅ Admin lain: Bisa Create New server, tapi tidak bisa manage existing"
 echo "✅ View server asli tidak diubah agar tab tetap normal"
-echo "🛡️ Security by: @danangvalentp"
+echo "🛡️ Security by: ${CONTACT_TELEGRAM}"

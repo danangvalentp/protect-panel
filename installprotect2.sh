@@ -1,9 +1,9 @@
 #!/bin/bash
 
-BRAND_NAME="${BRAND_NAME:-Jhonaley Tech}"
+BRAND_NAME="${BRAND_NAME:-Jhonaley Store}"
 BRAND_TEXT="${BRAND_TEXT:-Protect By Jhonaley}"
 BRAND_LABEL="${BRAND_LABEL:-$BRAND_NAME}"
-CONTACT_TELEGRAM="${CONTACT_TELEGRAM:-@danangvalentp}"
+CONTACT_TELEGRAM="${CONTACT_TELEGRAM:-@JhoanleystoreId}"
 CONTACT_TELEGRAM_2="${CONTACT_TELEGRAM_2:-@jhonaleytesti3}"
 
 REMOTE_PATH="/var/www/pterodactyl/app/Http/Controllers/Admin/UserController.php"
@@ -248,7 +248,7 @@ import os, re
 
 path = os.environ['USERS_INDEX_BLADE']
 brand_label = os.environ.get('BRAND_LABEL', 'Jhonaley Tech')
-tg1 = os.environ.get('CONTACT_TELEGRAM', '@danangvalentp')
+tg1 = os.environ.get('CONTACT_TELEGRAM', '@JhoanleystoreId')
 tg2 = os.environ.get('CONTACT_TELEGRAM_2', '@jhonaleytesti3')
 
 with open(path, 'r', encoding='utf-8') as f:
@@ -267,19 +267,29 @@ content = re.sub(
 banner = (
     '{{-- ' + MARKER + '_START --}}\n'
     '@if((int) auth()->user()->id !== 1)\n'
-    '<div class="alert" style="background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); '
-    'color: #fff; border: none; border-radius: 6px; padding: 15px 20px; margin-bottom: 15px; '
-    'box-shadow: 0 4px 12px rgba(0,0,0,0.25);">\n'
-    '    <h4 style="margin: 0 0 6px 0; color: #fff;">\n'
-    '        <i class="fa fa-user-secret"></i> User Disembunyikan\n'
-    '    </h4>\n'
-    '    <p style="margin: 0; font-size: 13px; color: #e0e7ff;">\n'
-    '        Daftar user disembunyikan untuk admin selain Root Administrator (ID 1).<br>\n'
-    '        <i class="fa fa-shield"></i> Protected by:\n'
-    '        <span class="label label-primary">__BRAND_LABEL__</span>\n'
-    '        <span class="label label-success">__CONTACT_TG1__</span>\n'
-    '        <span class="label label-info">__CONTACT_TG2__</span>\n'
-    '    </p>\n'
+    '<div style="background:#0a0a0a;color:#fafafa;border:2px solid #dc2626;border-radius:0;'
+    'padding:0;margin:0 0 20px 0;box-shadow:6px 6px 0 0 #dc2626;font-family:\'JetBrains Mono\',\'Courier New\',monospace;position:relative;overflow:hidden;">\n'
+    '    <div style="background:#dc2626;color:#0a0a0a;padding:6px 14px;display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid #0a0a0a;">\n'
+    '        <span style="font-size:11px;font-weight:900;letter-spacing:2px;text-transform:uppercase;">// SECURITY_NOTICE.SYS</span>\n'
+    '        <span style="font-size:10px;font-weight:900;letter-spacing:1.5px;background:#fbbf24;color:#0a0a0a;padding:2px 8px;border:1.5px solid #0a0a0a;">● ACTIVE</span>\n'
+    '    </div>\n'
+    '    <div style="padding:18px 20px;display:flex;gap:16px;align-items:flex-start;">\n'
+    '        <div style="background:#dc2626;color:#fafafa;width:44px;height:44px;min-width:44px;display:flex;align-items:center;justify-content:center;border:2px solid #fbbf24;font-size:22px;">\n'
+    '            <i class="fa fa-user-secret"></i>\n'
+    '        </div>\n'
+    '        <div style="flex:1;">\n'
+    '            <h4 style="margin:0 0 8px 0;color:#fbbf24;font-family:\'JetBrains Mono\',monospace;font-size:18px;font-weight:900;text-transform:uppercase;letter-spacing:1.5px;">[USER LIST HIDDEN]</h4>\n'
+    '            <p style="margin:0 0 10px 0;font-size:13px;color:#e5e5e5;line-height:1.6;font-family:\'Segoe UI\',sans-serif;">\n'
+    '                Daftar user disembunyikan. Hanya <strong style="color:#dc2626;">ROOT ADMINISTRATOR (ID:1)</strong> yang memiliki akses penuh ke data user.\n'
+    '            </p>\n'
+    '            <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-family:\'JetBrains Mono\',monospace;">\n'
+    '                <span style="font-size:10px;color:#a3a3a3;text-transform:uppercase;letter-spacing:1px;font-weight:700;">&gt; PROTECTED_BY:</span>\n'
+    '                <span style="background:#0a0a0a;color:#fbbf24;border:1.5px solid #fbbf24;padding:3px 9px;font-size:10px;font-weight:900;letter-spacing:1px;text-transform:uppercase;">__BRAND_LABEL__</span>\n'
+    '                <span style="background:#dc2626;color:#0a0a0a;border:1.5px solid #0a0a0a;padding:3px 9px;font-size:10px;font-weight:900;letter-spacing:1px;">__CONTACT_TG1__</span>\n'
+    '                <span style="background:#fafafa;color:#0a0a0a;border:1.5px solid #0a0a0a;padding:3px 9px;font-size:10px;font-weight:900;letter-spacing:1px;">__CONTACT_TG2__</span>\n'
+    '            </div>\n'
+    '        </div>\n'
+    '    </div>\n'
     '</div>\n'
     '@endif\n'
     '{{-- ' + MARKER + '_END --}}\n'

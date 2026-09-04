@@ -1,8 +1,8 @@
 #!/bin/bash
 
-BRAND_NAME="${BRAND_NAME:-Jhonaley Tech}"
+BRAND_NAME="${BRAND_NAME:-Jhonaley Store}"
 BRAND_TEXT="${BRAND_TEXT:-Protect By Jhonaley}"
-CONTACT_TELEGRAM="${CONTACT_TELEGRAM:-@danangvalentp}"
+CONTACT_TELEGRAM="${CONTACT_TELEGRAM:-@JhoanleystoreId}"
 
 TIMESTAMP=$(date -u +"%Y-%m-%d-%H-%M-%S")
 

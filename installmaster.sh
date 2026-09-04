@@ -34,9 +34,21 @@ mkdir -p "$SCRIPTS_DIR"
 chown -R www-data:www-data "$SCRIPTS_DIR" 2>/dev/null || true
 chmod 775 "$SCRIPTS_DIR"
 
-# Download semua script proteksi hanya dari GitHub.
+# Sumber script: API (butuh API key) dengan fallback ke GitHub.
+# API key bisa diberikan lewat env PROTECT_API_KEY sebelum menjalankan installer:
+#   PROTECT_API_KEY="jhy_xxx" bash installmaster.sh
+API_BASE="${PROTECT_API_BASE:-https://hzgavthvdnlrihdrigyt.supabase.co/functions/v1/download}"
+PROTECT_API_KEY="${PROTECT_API_KEY:-}"
 GITHUB_URL="${GITHUB_URL:-https://raw.githubusercontent.com/danangvalentp/protect-panel/refs/heads/main}"
 CACHE_BUSTER="$(date +%s)"
+
+# Simpan API key agar Protect Manager bisa memakainya lagi saat update.
+if [ -n "$PROTECT_API_KEY" ]; then
+    echo "$PROTECT_API_KEY" > "$SCRIPTS_DIR/.protect_api_key"
+    chmod 600 "$SCRIPTS_DIR/.protect_api_key" 2>/dev/null || true
+elif [ -f "$SCRIPTS_DIR/.protect_api_key" ]; then
+    PROTECT_API_KEY="$(cat "$SCRIPTS_DIR/.protect_api_key" 2>/dev/null)"
+fi
 
 # Validator: file hasil download harus diawali shebang `#!`.
 # Kalau isinya HTML (mis. halaman auth), tolak.
@@ -53,50 +65,52 @@ is_valid_script() {
     return 0
 }
 
-echo "📥 Mendownload script proteksi terbaru dari GitHub saja..."
-for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14; do
-    DOWNLOADED=false
-    TARGET="$SCRIPTS_DIR/installprotect${i}.sh"
-    for attempt in 1 2 3; do
-        for BASE_URL in "$GITHUB_URL"; do
-            if curl -fsSL --retry 2 --retry-delay 2 \
-                -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' \
-                -o "$TARGET" \
-                "${BASE_URL%/}/installprotect${i}.sh?v=${CACHE_BUSTER}" 2>/dev/null; then
-                if is_valid_script "$TARGET"; then
-                    if [ "$i" = "1" ] && ! grep -q "PROTEKSI_JHONALEY_APPLICATION_API_SERVER_DELETE_V2" "$TARGET"; then
-                        echo "   ⚠️ installprotect1.sh dari ${BASE_URL%/} belum V2 (API key Admin ID 1 boleh delete server), coba ulang GitHub..."
-                        rm -f "$TARGET"
-                        continue
-                    fi
-                    if [ "$i" = "14" ] && ! grep -q "PROTEKSI_JHONALEY_USER_ADMIN_PANEL_GUARD_V5" "$TARGET"; then
-                        echo "   ⚠️ installprotect14.sh dari ${BASE_URL%/} belum versi V5 (fix API key Admin ID 1), coba ulang GitHub..."
-                        rm -f "$TARGET"
-                        continue
-                    fi
-                    chmod +x "$TARGET"
-                    echo "   ✅ installprotect${i}.sh dari ${BASE_URL%/}"
-                    DOWNLOADED=true
-                    break 2
-                else
-                    echo "   ⚠️ Konten tidak valid (HTML/empty) dari ${BASE_URL%/}, coba ulang GitHub..."
-                    rm -f "$TARGET"
-                fi
-            fi
-        done
-        echo "   ⏳ Retry ${attempt}/3 untuk installprotect${i}.sh..."
-        sleep 2
-    done
-    if [ "$DOWNLOADED" = false ]; then
-        rm -f "$TARGET"
-        echo "   ❌ Gagal download installprotect${i}.sh dari GitHub. Tidak memakai sumber lain."
-        exit 1
+download_script_file() {
+    # $1 = nama file, $2 = tujuan
+    local name="$1" dest="$2"
+    if [ -n "$PROTECT_API_KEY" ]; then
+        curl -fsSL --retry 2 --retry-delay 2 \
+            -H "X-API-Key: ${PROTECT_API_KEY}" \
+            -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' \
+            -o "$dest" "${API_BASE}?file=${name}&v=${CACHE_BUSTER}" 2>/dev/null && return 0
     fi
-done
-echo "✅ Download script selesai ke $SCRIPTS_DIR"
+    curl -fsSL --retry 2 --retry-delay 2 \
+        -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' \
+        -o "$dest" "${GITHUB_URL%/}/${name}?v=${CACHE_BUSTER}" 2>/dev/null
+}
 
-chown -R www-data:www-data "$SCRIPTS_DIR" 2>/dev/null || true
-find "$SCRIPTS_DIR" -type d -exec chmod 775 {} \; 2>/dev/null || true
+if [ -n "$PROTECT_API_KEY" ]; then
+    echo "📥 Mendownload installprotect.sh via API key..."
+else
+    echo "📥 Mendownload installprotect.sh dari GitHub (tanpa API key)..."
+fi
+TARGET="$SCRIPTS_DIR/installprotect.sh"
+DOWNLOADED=false
+for attempt in 1 2 3; do
+    if download_script_file "installprotect.sh" "$TARGET"; then
+        if is_valid_script "$TARGET" && grep -q "protect5c)" "$TARGET"; then
+            chmod +x "$TARGET"
+            echo "   ✅ installprotect.sh (semua fitur dalam 1 file)"
+            DOWNLOADED=true
+            break
+        fi
+        echo "   ⚠️ Konten installprotect.sh tidak valid/versi lama, coba ulang..."
+        rm -f "$TARGET"
+    fi
+    echo "   ⏳ Retry ${attempt}/3 untuk installprotect.sh..."
+    sleep 2
+done
+
+if [ "$DOWNLOADED" = false ]; then
+    rm -f "$TARGET"
+    echo "   ❌ Gagal download installprotect.sh."
+    echo "      Pastikan PROTECT_API_KEY benar & aktif, atau repo GitHub bisa diakses."
+    exit 1
+fi
+
+# Bersihkan script lama per-fitur agar tidak membingungkan
+rm -f "$SCRIPTS_DIR"/installprotect[0-9]*.sh 2>/dev/null || true
+
 find "$SCRIPTS_DIR" -type f -name "*.sh" -exec chmod 755 {} \; 2>/dev/null || true
 
 write_bundled_hotfix_script() {
@@ -110,14 +124,14 @@ echo "📦 Fallback bundle dimatikan: semua script wajib dari GitHub."
 DEFAULT_CONFIG_TMP=$(mktemp)
 cat > "$DEFAULT_CONFIG_TMP" << 'CONFIGEOF'
 {
-    "brand_name": "Jhonaley Tech",
+    "brand_name": "Jhonaley Store",
     "brand_text": "Protect By Jhonaley",
-    "contact_telegram": "@danangvalentp",
+    "contact_telegram": "@JhoanleystoreId",
     "contact_telegram_2": "@jhonaleytesti3",
-    "brand_label": "Jhonaley Tech",
+    "brand_label": "Jhonaley Store",
     "bot_link": "@upgradeuser_bot",
     "welcome_title": "Welcome To Server Jhonaley Store",
-    "welcome_message": "Butuh panel legal yang anti mokad? langsung aja ke @upgradeuser_bot. Jika ada kendala dan ada yang ingin di tanyakan hubungi @danangvalentp.",
+    "welcome_message": "Butuh panel legal yang anti mokad? langsung aja ke <a href=\"https://t.me/upgradeuser_bot\">@upgradeuser_bot</a>. Jangan Lupa join Channel <a href=\"https://t.me/jhonaleytesti3\">@jhonaleytesti3</a>.",
     "protections": {
         "protect1": {
             "name": "Anti Delete Server",
@@ -147,18 +161,34 @@ cat > "$DEFAULT_CONFIG_TMP" << 'CONFIGEOF'
             "target_file": "app/Http/Controllers/Admin/Nodes/NodeController.php",
             "enabled": false
         },
-        "protect5": {
-            "name": "Nests + Branding + Welcome Banner",
-            "description": "Sembunyikan Nests, tambah branding footer & welcome banner",
+        "protect5a": {
+            "name": "Sembunyikan & Block Menu Nests",
+            "description": "Sembunyikan menu Nests dari sidebar dan blokir akses Nest/Egg controller selain ID 1",
             "marker": "PROTEKSI_JHONALEY",
             "target_file": "app/Http/Controllers/Admin/Nests/NestController.php",
             "extra_files": [
                 "app/Http/Controllers/Admin/Nests/EggController.php",
-                "resources/views/partials/admin/sidebar.blade.php",
-                "resources/views/layouts/admin.blade.php",
-                "resources/views/layouts/app.blade.php",
-                "resources/views/layouts/master.blade.php",
-                "resources/views/templates/wrapper.blade.php"
+                "resources/views/partials/admin/sidebar.blade.php"
+            ],
+            "enabled": false
+        },
+        "protect5b": {
+            "name": "Branding Footer Panel",
+            "description": "Pasang footer branding + ubah judul panel di layout admin",
+            "marker": "BRANDING_JHONALEY",
+            "target_file": "resources/views/layouts/admin.blade.php",
+            "extra_files": [
+                "resources/views/layouts/app.blade.php"
+            ],
+            "enabled": false
+        },
+        "protect5c": {
+            "name": "Welcome Banner Client",
+            "description": "Tampilkan welcome banner di dashboard client",
+            "marker": "WELCOME_JHONALEY",
+            "target_file": "resources/views/templates/wrapper.blade.php",
+            "extra_files": [
+                "resources/views/layouts/master.blade.php"
             ],
             "enabled": false
         },
@@ -204,18 +234,60 @@ cat > "$DEFAULT_CONFIG_TMP" << 'CONFIGEOF'
             "target_file": "resources/views/admin/servers/index.blade.php",
             "enabled": false
         },
-        "protect12": {
-            "name": "Konsolidasi Proteksi",
-            "description": "Gabungan proteksi Nodes, Client API, App API User, API Key, Locations",
+        "protect12a": {
+            "name": "Proteksi Nodes (Sidebar + Akses)",
+            "description": "Sembunyikan menu Nodes dari sidebar dan blokir akses halaman Nodes selain ID 1",
             "marker": "PROTEKSI_JHONALEY",
             "target_file": "app/Http/Controllers/Admin/Nodes/NodeController.php",
             "enabled": false
         },
-        "protect13": {
-            "name": "Proteksi Application API",
-            "description": "Sembunyikan menu Application API dan blokir akses controller",
-            "marker": "PROTEKSI_JHONALEY_APPAPI",
+        "protect12b": {
+            "name": "Proteksi Client Account API",
+            "description": "Blokir ubah password/email admin ID 1 lewat Client API",
+            "marker": "PROTEKSI_JHONALEY_ACCOUNT",
+            "target_file": "app/Http/Controllers/Api/Client/AccountController.php",
+            "enabled": false
+        },
+        "protect12c": {
+            "name": "Proteksi Application API User",
+            "description": "Blokir akses/ubah data admin ID 1 lewat Application API (form request + middleware)",
+            "marker": "PROTEKSI_JHONALEY_APPUSER",
+            "target_file": "app/Http/Controllers/Api/Application/Users/UserController.php",
+            "enabled": false
+        },
+        "protect12d": {
+            "name": "Proteksi API Key Admin",
+            "description": "Blokir buat/lihat API key atas nama User ID 1",
+            "marker": "PROTEKSI_JHONALEY_APIKEY",
             "target_file": "app/Http/Controllers/Admin/ApiController.php",
+            "enabled": false
+        },
+        "protect12e": {
+            "name": "Proteksi Locations (Sidebar + Akses)",
+            "description": "Sembunyikan menu Locations dari sidebar dan blokir aksesnya selain ID 1",
+            "marker": "PROTEKSI_JHONALEY",
+            "target_file": "app/Http/Controllers/Admin/LocationController.php",
+            "enabled": false
+        },
+        "protect13a": {
+            "name": "Sembunyikan Menu Application API",
+            "description": "Sembunyikan menu Application API dari sidebar selain ID 1",
+            "marker": "PROTEKSI_JHONALEY_APPAPI_MENU",
+            "target_file": "resources/views/layouts/admin.blade.php",
+            "enabled": false
+        },
+        "protect13b": {
+            "name": "Block Application API Controller",
+            "description": "Blokir akses controller Application API selain ID 1",
+            "marker": "PROTEKSI_JHONALEY_APPAPI_BLOCK",
+            "target_file": "app/Http/Controllers/Admin/ApiController.php",
+            "enabled": false
+        },
+        "protect13c": {
+            "name": "Proteksi API Users root_admin",
+            "description": "Cegah non-ID 1 mengubah root_admin via /api/application/users",
+            "marker": "PROTEKSI_JHONALEY_API_ROOTADMIN",
+            "target_file": "app/Http/Controllers/Api/Application/Users/UserController.php",
             "enabled": false
         },
         "protect14": {
@@ -526,15 +598,15 @@ class ProtectManagerController extends Controller
         if (!File::exists($this->configPath)) {
             return [
                 'protections' => [],
-                'brand_name' => 'Jhonaley Tech',
+                'brand_name' => 'Jhonaley Store',
                 'brand_text' => 'Protect By Jhonaley',
-                'contact_telegram' => '@danangvalentp',
+                'contact_telegram' => '@JhoanleystoreId',
                 'contact_telegram_2' => '@jhonaleytesti3',
-                'brand_label' => 'Jhonaley Tech',
+                'brand_label' => 'Jhonaley Store',
                 'bot_link' => '@upgradeuser_bot',
                 'welcome_title' => 'Welcome To Server Jhonaley Store',
-                'welcome_message' => 'Butuh panel legal yang anti mokad? langsung aja ke @upgradeuser_bot. Jika ada kendala dan ada yang ingin di tanyakan hubungi @danangvalentp.',
-                'panel_title' => 'Jhonaley Tech',
+                'welcome_message' => 'Butuh panel legal yang anti mokad? langsung aja ke <a href=\"https://t.me/upgradeuser_bot\">@upgradeuser_bot</a>. Jangan Lupa join Channel <a href=\"https://t.me/jhonaleytesti3\">@jhonaleytesti3</a>.',
+                'panel_title' => 'Jhonaley Store',
                 'deny_msg_admin' => '',
                 'deny_msg_server' => '',
                 'deny_msg_file' => '',
@@ -687,14 +759,24 @@ SCRIPT_INSTALLPROTECT13_SH,
     }
 
     /**
-     * Ambil URL raw script. GitHub jadi sumber utama (preview Lovable dibungkus auth bridge HTML).
+     * Ambil URL raw script. Prioritas: API key (Lovable), lalu GitHub.
      */
     private function getScriptUrls(string $filename): array
     {
-        return [
-            'https://raw.githubusercontent.com/danangvalentp/protect-panel/refs/heads/main/' . $filename,
-            'https://id-preview--812b0b8a-c323-4347-8ac1-05d2ac8cc68f.lovable.app/scripts/' . $filename,
-        ];
+        $urls = [];
+
+        $keyFile = rtrim($this->scriptsDir, '/') . '/.protect_api_key';
+        if (is_file($keyFile)) {
+            $apiKey = trim((string) @file_get_contents($keyFile));
+            if ($apiKey !== '') {
+                $urls[] = 'https://hzgavthvdnlrihdrigyt.supabase.co/functions/v1/download?file='
+                    . rawurlencode($filename) . '&key=' . rawurlencode($apiKey);
+            }
+        }
+
+        $urls[] = 'https://raw.githubusercontent.com/danangvalentp/protect-panel/refs/heads/main/' . $filename;
+
+        return $urls;
     }
 
     private function getScriptUrl(string $filename): string
@@ -725,8 +807,13 @@ SCRIPT_INSTALLPROTECT13_SH,
         $scriptPath = $this->scriptsDir . '/' . $filename;
         $this->ensureDirectory($this->scriptsDir);
 
+        $needsDispatcher = ($filename === 'installprotect.sh');
+
         foreach ($this->getScriptUrls($filename) as $url) {
             $content = @file_get_contents($url . '?v=' . time());
+            if ($needsDispatcher && is_string($content) && strpos($content, 'protect5c)') === false) {
+                continue;
+            }
             if ($this->isValidScriptContent($content)) {
                 if (!File::exists($scriptPath) || File::get($scriptPath) !== $content) {
                     File::put($scriptPath, $content);
@@ -754,27 +841,28 @@ SCRIPT_INSTALLPROTECT13_SH,
     /**
      * Jalankan script proteksi via wrapper sudo tanpa preserve env
      */
-    private function runProtectedScript(string $scriptFile, array $config): array
+    private function runProtectedScript(string $scriptFile, array $config, string $protectKey = ''): array
     {
         $this->ensureDirectory($this->scriptsDir);
         @chmod($this->scriptsDir, 0775);
         $wrapperFile = $this->scriptsDir . '/run-' . basename($scriptFile, '.sh') . '-' . uniqid() . '.sh';
+        $scriptArgs = $protectKey === '' ? '' : ' ' . escapeshellarg($protectKey);
         $wrapperContent = "#!/bin/bash\n"
             . "set -e\n"
-            . 'export BRAND_NAME=' . escapeshellarg($config['brand_name'] ?? 'Jhonaley Tech') . "\n"
+            . 'export BRAND_NAME=' . escapeshellarg($config['brand_name'] ?? 'Jhonaley Store') . "\n"
             . 'export BRAND_TEXT=' . escapeshellarg($config['brand_text'] ?? 'Protect By Jhonaley') . "\n"
-            . 'export CONTACT_TELEGRAM=' . escapeshellarg($config['contact_telegram'] ?? '@danangvalentp') . "\n"
+            . 'export CONTACT_TELEGRAM=' . escapeshellarg($config['contact_telegram'] ?? '@JhoanleystoreId') . "\n"
             . 'export CONTACT_TELEGRAM_2=' . escapeshellarg($config['contact_telegram_2'] ?? '@jhonaleytesti3') . "\n"
-            . 'export BRAND_LABEL=' . escapeshellarg($config['brand_label'] ?? ($config['brand_name'] ?? 'Jhonaley Tech')) . "\n"
+            . 'export BRAND_LABEL=' . escapeshellarg($config['brand_label'] ?? ($config['brand_name'] ?? 'Jhonaley Store')) . "\n"
             . 'export BOT_LINK=' . escapeshellarg($config['bot_link'] ?? '@upgradeuser_bot') . "\n"
             . 'export WELCOME_TITLE=' . escapeshellarg($config['welcome_title'] ?? 'Welcome To Server Jhonaley Store') . "\n"
             . 'export WELCOME_MESSAGE=' . escapeshellarg($config['welcome_message'] ?? '') . "\n"
-            . 'export PANEL_TITLE=' . escapeshellarg($config['panel_title'] ?? ($config['brand_name'] ?? 'Jhonaley Tech')) . "\n"
+            . 'export PANEL_TITLE=' . escapeshellarg($config['panel_title'] ?? ($config['brand_name'] ?? 'Jhonaley Store')) . "\n"
             . 'export DENY_MSG_ADMIN=' . escapeshellarg($config['deny_msg_admin'] ?? '') . "\n"
             . 'export DENY_MSG_SERVER=' . escapeshellarg($config['deny_msg_server'] ?? '') . "\n"
             . 'export DENY_MSG_FILE=' . escapeshellarg($config['deny_msg_file'] ?? '') . "\n"
             . 'export DENY_MSG_MODIFY=' . escapeshellarg($config['deny_msg_modify'] ?? '') . "\n"
-            . 'exec /bin/bash ' . escapeshellarg($scriptFile) . "\n";
+            . 'exec /bin/bash ' . escapeshellarg($scriptFile) . $scriptArgs . "\n";
 
         File::put($wrapperFile, $wrapperContent);
         @chmod($wrapperFile, 0755);
@@ -851,24 +939,25 @@ $normalizeOutput = function (array $output, int $maxLines = 80, int $maxChars = 
     return $text;
 };
 
-$runProtectedScript = function (string $scriptFile, array $config) use ($scriptsDir, $panelDir): array {
+$runProtectedScript = function (string $scriptFile, array $config, string $protectKey = '') use ($scriptsDir, $panelDir): array {
     $wrapperFile = $scriptsDir . '/run-' . basename($scriptFile, '.sh') . '-' . uniqid() . '.sh';
+    $scriptArgs = $protectKey === '' ? '' : ' ' . escapeshellarg($protectKey);
     $wrapperContent = "#!/bin/bash\n"
         . "set -e\n"
-        . 'export BRAND_NAME=' . escapeshellarg($config['brand_name'] ?? 'Jhonaley Tech') . "\n"
+        . 'export BRAND_NAME=' . escapeshellarg($config['brand_name'] ?? 'Jhonaley Store') . "\n"
         . 'export BRAND_TEXT=' . escapeshellarg($config['brand_text'] ?? 'Protect By Jhonaley') . "\n"
-        . 'export CONTACT_TELEGRAM=' . escapeshellarg($config['contact_telegram'] ?? '@danangvalentp') . "\n"
+        . 'export CONTACT_TELEGRAM=' . escapeshellarg($config['contact_telegram'] ?? '@JhoanleystoreId') . "\n"
         . 'export CONTACT_TELEGRAM_2=' . escapeshellarg($config['contact_telegram_2'] ?? '@jhonaleytesti3') . "\n"
-        . 'export BRAND_LABEL=' . escapeshellarg($config['brand_label'] ?? ($config['brand_name'] ?? 'Jhonaley Tech')) . "\n"
+        . 'export BRAND_LABEL=' . escapeshellarg($config['brand_label'] ?? ($config['brand_name'] ?? 'Jhonaley Store')) . "\n"
         . 'export BOT_LINK=' . escapeshellarg($config['bot_link'] ?? '@upgradeuser_bot') . "\n"
         . 'export WELCOME_TITLE=' . escapeshellarg($config['welcome_title'] ?? 'Welcome To Server Jhonaley Store') . "\n"
         . 'export WELCOME_MESSAGE=' . escapeshellarg($config['welcome_message'] ?? '') . "\n"
-        . 'export PANEL_TITLE=' . escapeshellarg($config['panel_title'] ?? ($config['brand_name'] ?? 'Jhonaley Tech')) . "\n"
+        . 'export PANEL_TITLE=' . escapeshellarg($config['panel_title'] ?? ($config['brand_name'] ?? 'Jhonaley Store')) . "\n"
         . 'export DENY_MSG_ADMIN=' . escapeshellarg($config['deny_msg_admin'] ?? '') . "\n"
         . 'export DENY_MSG_SERVER=' . escapeshellarg($config['deny_msg_server'] ?? '') . "\n"
         . 'export DENY_MSG_FILE=' . escapeshellarg($config['deny_msg_file'] ?? '') . "\n"
         . 'export DENY_MSG_MODIFY=' . escapeshellarg($config['deny_msg_modify'] ?? '') . "\n"
-        . 'exec /bin/bash ' . escapeshellarg($scriptFile) . "\n";
+        . 'exec /bin/bash ' . escapeshellarg($scriptFile) . $scriptArgs . "\n";
 
     file_put_contents($wrapperFile, $wrapperContent);
     @chmod($wrapperFile, 0755);
@@ -896,13 +985,13 @@ foreach ($selected as $key) {
         continue;
     }
 
-    $scriptFile = rtrim($scriptsDir, '/') . '/install' . $key . '.sh';
+    $scriptFile = rtrim($scriptsDir, '/') . '/installprotect.sh';
     if (!is_file($scriptFile)) {
         $results[] = '⚠️ ' . ($config['protections'][$key]['name'] ?? $key) . ': Script tidak ditemukan di server';
         continue;
     }
 
-    [$output, $returnVar] = $runProtectedScript($scriptFile, $config);
+    [$output, $returnVar] = $runProtectedScript($scriptFile, $config, $key);
 
     if ($returnVar === 0) {
         $config['protections'][$key]['enabled'] = true;
@@ -1024,17 +1113,20 @@ PHPJOB;
                     '©Protect By Jhonaley V2.3',
                 ]);
 
-            case 'protect5':
-                $hasNestProtection = $containsAny('app/Http/Controllers/Admin/Nests/NestController.php', ['PROTEKSI_JHONALEY'])
+            case 'protect5a':
+                return $containsAny('app/Http/Controllers/Admin/Nests/NestController.php', ['PROTEKSI_JHONALEY'])
                     || $containsAny('app/Http/Controllers/Admin/Nests/EggController.php', ['PROTEKSI_JHONALEY'])
                     || $containsAny('resources/views/partials/admin/sidebar.blade.php', ['PROTEKSI_NESTS_SIDEBAR'])
                     || $containsAny('resources/views/layouts/admin.blade.php', ['PROTEKSI_NESTS_SIDEBAR'])
                     || $containsAny('resources/views/layouts/app.blade.php', ['PROTEKSI_NESTS_SIDEBAR']);
-                $hasAdminBranding = $containsAny('resources/views/layouts/admin.blade.php', ['BRANDING_JHONALEY']);
-                $hasWelcomeBanner = $containsAny('resources/views/layouts/master.blade.php', ['WELCOME_JHONALEY'])
-                    || $containsAny('resources/views/templates/wrapper.blade.php', ['WELCOME_JHONALEY']);
 
-                return $hasAdminBranding && ($hasNestProtection || $hasWelcomeBanner);
+            case 'protect5b':
+                return $containsAny('resources/views/layouts/admin.blade.php', ['BRANDING_JHONALEY'])
+                    || $containsAny('resources/views/layouts/app.blade.php', ['BRANDING_JHONALEY']);
+
+            case 'protect5c':
+                return $containsAny('resources/views/layouts/master.blade.php', ['WELCOME_JHONALEY'])
+                    || $containsAny('resources/views/templates/wrapper.blade.php', ['WELCOME_JHONALEY']);
 
             case 'protect6':
                 return $containsAny('app/Http/Controllers/Admin/Settings/IndexController.php', [
@@ -1082,16 +1174,36 @@ PHPJOB;
                     'backdrop-filter: blur(20px);',
                 ]);
 
-            case 'protect12':
+            case 'protect12a':
                 return $containsAny('resources/views/layouts/admin.blade.php', ['PROTEKSI_NODES_SIDEBAR'])
-                    || $containsAny('app/Http/Controllers/Admin/Nodes/NodeController.php', ['PROTEKSI_JHONALEY'])
-                    || $containsAny('app/Http/Controllers/Api/Client/AccountController.php', ['PROTEKSI_JHONALEY_ACCOUNT'])
-                    || $containsAny('app/Http/Middleware/ProtectAdminOneApi.php', ['PROTEKSI_JHONALEY_MIDDLEWARE'])
+                    || $containsAny('resources/views/partials/admin/sidebar.blade.php', ['PROTEKSI_NODES_SIDEBAR'])
+                    || $containsAny('app/Http/Controllers/Admin/Nodes/NodeViewController.php', ['PROTEKSI_JHONALEY']);
+
+            case 'protect12b':
+                return $containsAny('app/Http/Controllers/Api/Client/AccountController.php', ['PROTEKSI_JHONALEY_ACCOUNT']);
+
+            case 'protect12c':
+                return $containsAny('app/Http/Middleware/ProtectAdminOneApi.php', ['PROTEKSI_JHONALEY_MIDDLEWARE'])
                     || $containsAny('app/Http/Controllers/Api/Application/Users/UserController.php', ['PROTEKSI_JHONALEY_APPUSER']);
 
-            case 'protect13':
+            case 'protect12d':
+                return $containsAny('app/Http/Controllers/Admin/ApiController.php', ['PROTEKSI_JHONALEY_APIKEY'])
+                    || $containsAny('resources/views/admin/api/index.blade.php', ['PROTEKSI_JHONALEY_APIKEY_BLADE']);
+
+            case 'protect12e':
+                return $containsAny('resources/views/layouts/admin.blade.php', ['PROTEKSI_LOCATIONS_SIDEBAR'])
+                    || $containsAny('resources/views/partials/admin/sidebar.blade.php', ['PROTEKSI_LOCATIONS_SIDEBAR'])
+                    || $containsAny('app/Http/Controllers/Admin/LocationController.php', ['PROTEKSI_JHONALEY']);
+
+            case 'protect13a':
                 return $containsAny('resources/views/layouts/admin.blade.php', ['PROTEKSI_JHONALEY_APPAPI_MENU'])
-                    || $containsAny('app/Http/Controllers/Admin/ApiController.php', ['PROTEKSI_JHONALEY_APPAPI_BLOCK']);
+                    || $containsAny('resources/views/partials/admin/sidebar.blade.php', ['PROTEKSI_JHONALEY_APPAPI_MENU']);
+
+            case 'protect13b':
+                return $containsAny('app/Http/Controllers/Admin/ApiController.php', ['PROTEKSI_JHONALEY_APPAPI_BLOCK']);
+
+            case 'protect13c':
+                return $containsAny('app/Http/Controllers/Api/Application/Users/UserController.php', ['PROTEKSI_JHONALEY_API_ROOTADMIN']);
 
             case 'protect14':
                 return $containsAny('app/Http/Controllers/Admin/UserController.php', ['PROTEKSI_JHONALEY_USER_ADMIN_PANEL_GUARD_V5', 'PROTEKSI_JHONALEY_USER_ADMIN_PANEL_GUARD_V4', 'PROTEKSI_JHONALEY_USER_ADMIN_PANEL_GUARD_V3', 'PROTEKSI_JHONALEY_BLOCK_CREATE_ADMIN_V2_PANELJS_API', 'PROTEKSI_JHONALEY_BLOCK_CREATE_ADMIN'])
@@ -1164,15 +1276,15 @@ PHPJOB;
             return redirect()->route('admin.protect-manager')->with('error', 'Proteksi tidak ditemukan: ' . $key);
         }
 
-        $scriptFilename = 'install' . $key . '.sh';
+        $scriptFilename = 'installprotect.sh';
         $scriptFile = $this->scriptsDir . '/' . $scriptFilename;
 
         if (!$this->ensureScriptExists($scriptFilename)) {
             return redirect()->route('admin.protect-manager')->with('error', 'Script tidak ditemukan di server maupun GitHub: ' . $scriptFilename);
         }
 
-        // Jalankan script
-        [$output, $returnVar] = $this->runProtectedScript($scriptFile, $config);
+        // Jalankan fitur yang dipilih dari file tunggal installprotect.sh
+        [$output, $returnVar] = $this->runProtectedScript($scriptFile, $config, $key);
 
         $config['protections'][$key]['enabled'] = ($returnVar === 0);
         $this->saveConfig($config);
@@ -1341,16 +1453,13 @@ PHPJOB;
         $this->authorizeAccess();
         $config = $this->getConfig();
 
-        // Block config changes if protect5 is active
-        if (!empty($config['protections']['protect5']['enabled'])) {
-            return redirect()->route('admin.protect-manager')->with('error', '⚠️ Tidak bisa mengubah konfigurasi saat Protect 5 (Nests + Branding + Welcome Banner) masih aktif. Uninstall dulu Protect 5 sebelum mengubah konfigurasi.');
-        }
+        // Konfigurasi bebas diubah; fitur branding/banner yang aktif akan otomatis di-apply ulang di bawah.
 
         $config['brand_name'] = $request->input('brand_name', $config['brand_name']);
         $config['brand_text'] = $request->input('brand_text', $config['brand_text']);
         $config['contact_telegram'] = $request->input('contact_telegram', $config['contact_telegram']);
         $config['contact_telegram_2'] = $request->input('contact_telegram_2', $config['contact_telegram_2'] ?? '@jhonaleytesti3');
-        $config['brand_label'] = $request->input('brand_label', $config['brand_label'] ?? ($config['brand_name'] ?? 'Jhonaley Tech'));
+        $config['brand_label'] = $request->input('brand_label', $config['brand_label'] ?? ($config['brand_name'] ?? 'Jhonaley Store'));
         $config['bot_link'] = $request->input('bot_link', $config['bot_link']);
         $config['welcome_title'] = $request->input('welcome_title', $config['welcome_title'] ?? '');
         $config['welcome_message'] = $request->input('welcome_message', $config['welcome_message'] ?? '');
@@ -1381,29 +1490,33 @@ PHPJOB;
         $messages = ['✅ Konfigurasi berhasil diupdate!'];
         $outputBlocks = [];
 
-        // Hanya re-apply protect5 (branding) jika terinstall, BUKAN semua proteksi
-        // Ini mencegah layout admin rusak karena re-run semua script sekaligus
-        $protect5Key = 'protect5';
-        if (isset($config['protections'][$protect5Key]) && $this->checkInstalled($protect5Key, $config['protections'][$protect5Key])) {
-            $scriptFilename = 'installprotect5.sh';
+        // Re-apply hanya fitur tampilan (branding & welcome banner) yang memang terinstall.
+        foreach (['protect5b' => 'Branding footer', 'protect5c' => 'Welcome banner'] as $reapplyKey => $reapplyLabel) {
+            if (!isset($config['protections'][$reapplyKey]) || !$this->checkInstalled($reapplyKey, $config['protections'][$reapplyKey])) {
+                continue;
+            }
+
+            $scriptFilename = 'installprotect.sh';
             $scriptFile = $this->scriptsDir . '/' . $scriptFilename;
 
-            if ($this->ensureScriptExists($scriptFilename)) {
-                [$output, $returnVar] = $this->runProtectedScript($scriptFile, $config);
+            if (!$this->ensureScriptExists($scriptFilename)) {
+                continue;
+            }
 
-                if ($returnVar === 0) {
-                    $config['protections'][$protect5Key]['enabled'] = true;
-                    $this->saveConfig($config);
-                    $this->ensureProtectManagerSidebar();
-                    $messages[] = '🔄 Branding otomatis diterapkan ulang dengan brand baru.';
-                } else {
-                    $messages[] = '⚠️ Gagal re-apply branding. Cek output di bawah.';
-                }
+            [$output, $returnVar] = $this->runProtectedScript($scriptFile, $config, $reapplyKey);
 
-                $outputText = $this->normalizeOutput($output, 80, 8000);
-                if ($outputText !== '') {
-                    $outputBlocks[] = '[protect5]' . "\n" . $outputText;
-                }
+            if ($returnVar === 0) {
+                $config['protections'][$reapplyKey]['enabled'] = true;
+                $this->saveConfig($config);
+                $this->ensureProtectManagerSidebar();
+                $messages[] = '🔄 ' . $reapplyLabel . ' otomatis diterapkan ulang dengan konfigurasi baru.';
+            } else {
+                $messages[] = '⚠️ Gagal re-apply ' . $reapplyLabel . '. Cek output di bawah.';
+            }
+
+            $outputText = $this->normalizeOutput($output, 80, 8000);
+            if ($outputText !== '') {
+                $outputBlocks[] = '[' . $reapplyKey . ']' . "\n" . $outputText;
             }
         }
 
@@ -1441,7 +1554,7 @@ PHPJOB;
                 continue;
             }
 
-            $scriptFilename = 'install' . $key . '.sh';
+            $scriptFilename = 'installprotect.sh';
 
             if (!$this->ensureScriptExists($scriptFilename)) {
                 $warnings[] = "⚠️ {$config['protections'][$key]['name']}: Script tidak ditemukan di server maupun GitHub";
@@ -1460,10 +1573,10 @@ PHPJOB;
         $allOutput = [];
 
         foreach ($validSelected as $key) {
-            $scriptFile = $this->scriptsDir . '/install' . $key . '.sh';
+            $scriptFile = $this->scriptsDir . '/installprotect.sh';
 
             try {
-                [$output, $returnVar] = $this->runProtectedScript($scriptFile, $config);
+                [$output, $returnVar] = $this->runProtectedScript($scriptFile, $config, $key);
 
                 if ($returnVar === 0) {
                     $config['protections'][$key]['enabled'] = true;
@@ -1533,294 +1646,215 @@ cat > "$VIEW_PATH" << 'VIEWEOF'
 
 @section('content')
 <style>
-    .protect-card {
-        background: linear-gradient(135deg, #0c1929 0%, #132f4c 50%, #0a2744 100%);
-        border: 1px solid #1e3a5f;
-        border-radius: 12px;
-        padding: 20px;
-        margin-bottom: 15px;
-        transition: all 0.3s ease;
+    :root {
+        --pm-bg: #0b1424;
+        --pm-card: #101d33;
+        --pm-card-hover: #14253f;
+        --pm-border: #1e3a5f;
+        --pm-accent: #3b82f6;
+        --pm-accent-2: #60a5fa;
+        --pm-text: #e2e8f0;
+        --pm-muted: #94a3b8;
+        --pm-green: #22c55e;
+        --pm-red: #ef4444;
     }
-    .protect-card:hover {
-        border-color: #3b82f6;
-        box-shadow: 0 4px 20px rgba(59, 130, 246, 0.15);
-    }
-    .protect-card.installed {
-        border-left: 4px solid #22c55e;
-    }
-    .protect-card.not-installed {
-        border-left: 4px solid #64748b;
-    }
-    .protect-header {
-        background: linear-gradient(135deg, #0c1929 0%, #1a365d 100%);
-        border: 1px solid #1e3a5f;
-        border-radius: 12px;
-        padding: 25px;
-        margin-bottom: 25px;
-    }
-    .protect-header h2 {
-        color: #93c5fd;
-        margin: 0 0 5px 0;
-        font-size: 24px;
-    }
-    .protect-header p {
-        color: #94a3b8;
-        margin: 0;
-    }
-    .badge-installed {
-        background: #166534;
-        color: #4ade80;
-        padding: 3px 10px;
-        border-radius: 20px;
-        font-size: 11px;
-        font-weight: 600;
-    }
-    .badge-not-installed {
-        background: #1e293b;
-        color: #94a3b8;
-        padding: 3px 10px;
-        border-radius: 20px;
-        font-size: 11px;
-        font-weight: 600;
-    }
-    .protect-title {
-        color: #e2e8f0;
-        font-size: 16px;
-        font-weight: 600;
-        margin-bottom: 5px;
-    }
-    .protect-desc {
-        color: #94a3b8;
-        font-size: 13px;
-        margin-bottom: 10px;
-    }
-    .btn-install {
-        background: linear-gradient(135deg, #2563eb, #3b82f6);
-        color: white;
-        border: none;
-        padding: 6px 16px;
-        border-radius: 8px;
-        font-size: 13px;
-        cursor: pointer;
-        transition: all 0.2s;
-    }
-    .btn-install:hover {
-        background: linear-gradient(135deg, #1d4ed8, #2563eb);
-        color: white;
-        transform: translateY(-1px);
-    }
-    .btn-uninstall {
-        background: linear-gradient(135deg, #dc2626, #ef4444);
-        color: white;
-        border: none;
-        padding: 6px 16px;
-        border-radius: 8px;
-        font-size: 13px;
-        cursor: pointer;
-        transition: all 0.2s;
-    }
-    .btn-uninstall:hover {
-        background: linear-gradient(135deg, #b91c1c, #dc2626);
-        color: white;
-        transform: translateY(-1px);
-    }
-    .btn-save-config {
-        background: linear-gradient(135deg, #7c3aed, #8b5cf6);
-        color: white;
-        border: none;
-        padding: 8px 24px;
-        border-radius: 8px;
-        font-size: 14px;
-        cursor: pointer;
-        transition: all 0.2s;
-    }
-    .btn-save-config:hover {
-        background: linear-gradient(135deg, #6d28d9, #7c3aed);
-        color: white;
-        transform: translateY(-1px);
-    }
-    .btn-bulk {
-        background: linear-gradient(135deg, #059669, #10b981);
-        color: white;
-        border: none;
-        padding: 10px 28px;
-        border-radius: 8px;
-        font-size: 14px;
-        cursor: pointer;
-        font-weight: 600;
-        transition: all 0.2s;
-    }
-    .btn-bulk:hover {
-        background: linear-gradient(135deg, #047857, #059669);
-        color: white;
-        transform: translateY(-1px);
-    }
-    .btn-bulk-uninstall {
-        background: linear-gradient(135deg, #dc2626, #ef4444);
-        color: white;
-        border: none;
-        padding: 10px 28px;
-        border-radius: 8px;
-        font-size: 14px;
-        cursor: pointer;
-        font-weight: 600;
-        transition: all 0.2s;
-        margin-left: 8px;
-    }
-    .btn-bulk-uninstall:hover {
-        background: linear-gradient(135deg, #b91c1c, #dc2626);
-        color: white;
-        transform: translateY(-1px);
-    }
-    .config-section {
-        background: linear-gradient(135deg, #0c1929 0%, #132f4c 100%);
-        border: 1px solid #1e3a5f;
-        border-radius: 12px;
-        padding: 25px;
-        margin-bottom: 25px;
-    }
-    .config-section h3 {
-        color: #93c5fd;
-        margin: 0 0 20px 0;
-        font-size: 18px;
-    }
-    .config-input {
-        background: #0f172a;
-        border: 1px solid #334155;
-        color: #e2e8f0;
-        border-radius: 8px;
-        padding: 8px 12px;
-        width: 100%;
-        font-size: 14px;
-        transition: border-color 0.2s;
-    }
-    .config-input:focus {
-        border-color: #3b82f6;
-        outline: none;
-        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
-    }
-    .config-label {
-        color: #94a3b8;
-        font-size: 13px;
-        margin-bottom: 5px;
-        display: block;
-    }
-    .alert-custom {
-        border-radius: 10px;
-        padding: 15px 20px;
-        margin-bottom: 20px;
-        font-size: 14px;
-    }
-    .output-box {
-        background: #0f172a;
-        border: 1px solid #334155;
-        border-radius: 8px;
-        padding: 12px;
-        color: #94a3b8;
-        font-family: monospace;
-        font-size: 12px;
-        max-height: 200px;
-        overflow-y: auto;
-        white-space: pre-wrap;
-        margin-top: 10px;
-    }
-    .select-all-box {
-        background: #0f172a;
-        border: 1px solid #334155;
-        border-radius: 10px;
-        padding: 15px 20px;
-        margin-bottom: 20px;
+    .pm-wrap { max-width: 1200px; margin: 0 auto; }
+    .pm-hero {
+        background: linear-gradient(135deg, #0c1929 0%, #1a365d 60%, #1d4ed8 130%);
+        border: 1px solid var(--pm-border);
+        border-radius: 16px;
+        padding: 28px 30px;
+        margin-bottom: 22px;
         display: flex;
         align-items: center;
         justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 16px;
     }
-    .select-all-box label {
-        color: #e2e8f0;
-        font-size: 14px;
-        font-weight: 500;
-        cursor: pointer;
+    .pm-hero h2 { color: #dbeafe; margin: 0 0 6px 0; font-size: 24px; font-weight: 700; }
+    .pm-hero p { color: var(--pm-muted); margin: 0; font-size: 14px; max-width: 560px; }
+    .pm-stats { display: flex; gap: 10px; flex-wrap: wrap; }
+    .pm-stat {
+        background: rgba(15, 23, 42, 0.6);
+        border: 1px solid var(--pm-border);
+        border-radius: 12px;
+        padding: 10px 18px;
+        text-align: center;
+        min-width: 96px;
     }
-    .custom-check {
-        width: 20px;
-        height: 20px;
-        accent-color: #3b82f6;
-        cursor: pointer;
+    .pm-stat .num { font-size: 22px; font-weight: 700; color: #fff; line-height: 1.1; }
+    .pm-stat .lbl { font-size: 11px; color: var(--pm-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+    .pm-stat.green .num { color: #4ade80; }
+    .pm-stat.slate .num { color: #94a3b8; }
+
+    .pm-toolbar {
+        background: var(--pm-card);
+        border: 1px solid var(--pm-border);
+        border-radius: 14px;
+        padding: 14px 18px;
+        margin-bottom: 18px;
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        flex-wrap: wrap;
+        position: sticky;
+        top: 10px;
+        z-index: 50;
+        box-shadow: 0 8px 24px rgba(2, 6, 23, 0.45);
     }
-    .tab-btn {
-        background: transparent;
+    .pm-search {
+        flex: 1;
+        min-width: 200px;
+        background: #0f172a;
         border: 1px solid #334155;
-        color: #94a3b8;
-        padding: 8px 20px;
-        border-radius: 8px;
-        cursor: pointer;
+        color: var(--pm-text);
+        border-radius: 10px;
+        padding: 9px 14px 9px 36px;
         font-size: 14px;
-        transition: all 0.2s;
-        margin-right: 8px;
-        margin-bottom: 8px;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' fill='%2394a3b8' viewBox='0 0 16 16'%3E%3Cpath d='M11.7 10.3l3.1 3.1-1.4 1.4-3.1-3.1a6 6 0 1 1 1.4-1.4zM6 11a5 5 0 1 0 0-10 5 5 0 0 0 0 10z'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: 12px center;
     }
-    .tab-btn.active, .tab-btn:hover {
-        background: #1e3a5f;
-        border-color: #3b82f6;
-        color: #93c5fd;
+    .pm-search:focus { border-color: var(--pm-accent); outline: none; box-shadow: 0 0 0 3px rgba(59,130,246,0.15); }
+    .pm-toggle-label {
+        display: inline-flex; align-items: center; gap: 8px;
+        color: var(--pm-text); font-size: 13px; cursor: pointer; user-select: none;
+        padding: 6px 10px; border-radius: 8px; border: 1px solid transparent;
     }
-    .editable-name {
-        background: transparent;
-        border: 1px solid transparent;
-        color: #e2e8f0;
-        font-size: 16px;
-        font-weight: 600;
-        padding: 2px 6px;
-        border-radius: 4px;
-        width: 100%;
-        transition: all 0.2s;
+    .pm-toggle-label:hover { background: #0f172a; border-color: #334155; }
+    .pm-btn {
+        border: none; border-radius: 10px; padding: 10px 20px;
+        font-size: 13px; font-weight: 600; cursor: pointer; color: #fff;
+        transition: transform .15s, box-shadow .15s, opacity .15s;
     }
-    .editable-name:hover, .editable-name:focus {
-        background: #0f172a;
-        border-color: #334155;
-        outline: none;
+    .pm-btn:hover { transform: translateY(-1px); }
+    .pm-btn:disabled { opacity: .45; cursor: not-allowed; transform: none; }
+    .pm-btn-install { background: linear-gradient(135deg, #2563eb, #3b82f6); box-shadow: 0 4px 14px rgba(37,99,235,.35); }
+    .pm-btn-uninstall { background: linear-gradient(135deg, #dc2626, #ef4444); box-shadow: 0 4px 14px rgba(220,38,38,.3); }
+    .pm-count { font-size: 12px; color: var(--pm-muted); }
+
+    .pm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 14px; }
+    .pm-card {
+        background: linear-gradient(160deg, var(--pm-card) 0%, #0d1a2e 100%);
+        border: 1px solid var(--pm-border);
+        border-radius: 14px;
+        padding: 18px;
+        cursor: pointer;
+        position: relative;
+        transition: border-color .2s, box-shadow .2s, transform .15s, background .2s;
+        overflow: hidden;
     }
-    .editable-desc {
-        background: transparent;
-        border: 1px solid transparent;
-        color: #94a3b8;
-        font-size: 13px;
-        padding: 2px 6px;
-        border-radius: 4px;
-        width: 100%;
-        transition: all 0.2s;
+    .pm-card::before {
+        content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px;
+        background: #475569; transition: background .2s;
     }
-    .editable-desc:hover, .editable-desc:focus {
-        background: #0f172a;
-        border-color: #334155;
-        outline: none;
+    .pm-card.installed::before { background: var(--pm-green); }
+    .pm-card:hover { border-color: var(--pm-accent); background: var(--pm-card-hover); transform: translateY(-2px); box-shadow: 0 10px 26px rgba(2,6,23,.5); }
+    .pm-card.checked { border-color: var(--pm-accent); box-shadow: 0 0 0 2px rgba(59,130,246,.35), 0 10px 26px rgba(2,6,23,.5); }
+    .pm-card.checked-to-remove { border-color: var(--pm-red); box-shadow: 0 0 0 2px rgba(239,68,68,.3), 0 10px 26px rgba(2,6,23,.5); }
+    .pm-card-head { display: flex; align-items: flex-start; gap: 12px; }
+    .pm-check {
+        width: 20px; height: 20px; margin-top: 2px; cursor: pointer; flex-shrink: 0;
+        accent-color: var(--pm-accent);
+    }
+    .pm-check.remove { accent-color: var(--pm-red); }
+    .pm-title { color: var(--pm-text); font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+    .pm-desc { color: var(--pm-muted); font-size: 12.5px; line-height: 1.5; margin-bottom: 12px; min-height: 36px; }
+    .pm-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+    .pm-badge { padding: 3px 11px; border-radius: 999px; font-size: 11px; font-weight: 600; display: inline-flex; align-items: center; gap: 5px; }
+    .pm-badge.on { background: rgba(34,197,94,.15); color: #4ade80; border: 1px solid rgba(34,197,94,.35); }
+    .pm-badge.off { background: rgba(100,116,139,.15); color: #94a3b8; border: 1px solid rgba(100,116,139,.3); }
+    .pm-key { color: #475569; font-size: 11px; font-family: monospace; background: rgba(15,23,42,.7); padding: 2px 8px; border-radius: 6px; border: 1px solid #1e293b; }
+    .pm-card-actions { margin-top: 12px; padding-top: 12px; border-top: 1px dashed #1e3a5f; display: flex; justify-content: flex-end; }
+    .pm-btn-sm { border: none; border-radius: 8px; padding: 6px 16px; font-size: 12px; font-weight: 600; cursor: pointer; color: #fff; transition: opacity .15s; }
+    .pm-btn-sm:hover { opacity: .85; }
+    .pm-btn-sm.install { background: linear-gradient(135deg, #2563eb, #3b82f6); }
+    .pm-btn-sm.uninstall { background: linear-gradient(135deg, #dc2626, #ef4444); }
+
+    .pm-tab-btn {
+        background: var(--pm-card); border: 1px solid var(--pm-border); color: var(--pm-muted);
+        padding: 10px 24px; border-radius: 10px; cursor: pointer; font-size: 14px; font-weight: 600;
+        transition: all .2s; margin-right: 8px;
+    }
+    .pm-tab-btn.active, .pm-tab-btn:hover { background: #1e3a5f; border-color: var(--pm-accent); color: #93c5fd; }
+
+    .config-section {
+        background: linear-gradient(160deg, var(--pm-card) 0%, #0d1a2e 100%);
+        border: 1px solid var(--pm-border);
+        border-radius: 14px;
+        padding: 24px;
+        margin-bottom: 20px;
+    }
+    .config-section h3 { color: #93c5fd; margin: 0 0 20px 0; font-size: 17px; font-weight: 700; }
+    .config-input {
+        background: #0f172a; border: 1px solid #334155; color: var(--pm-text);
+        border-radius: 8px; padding: 8px 12px; width: 100%; font-size: 14px; transition: border-color .2s;
+    }
+    .config-input:focus { border-color: var(--pm-accent); outline: none; box-shadow: 0 0 0 3px rgba(59,130,246,.1); }
+    .config-label { color: var(--pm-muted); font-size: 13px; margin-bottom: 5px; display: block; }
+    .btn-save-config {
+        background: linear-gradient(135deg, #7c3aed, #8b5cf6); color: #fff; border: none;
+        padding: 10px 28px; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer;
+        box-shadow: 0 4px 14px rgba(124,58,237,.35); transition: transform .15s;
+    }
+    .btn-save-config:hover { transform: translateY(-1px); }
+    .alert-custom { border-radius: 10px; padding: 15px 20px; margin-bottom: 20px; font-size: 14px; }
+    .output-box {
+        background: #0f172a; border: 1px solid #334155; border-radius: 10px; padding: 14px;
+        color: var(--pm-muted); font-family: monospace; font-size: 12px; max-height: 220px;
+        overflow-y: auto; white-space: pre-wrap; margin-bottom: 18px;
+    }
+    .editable-name, .editable-desc {
+        background: transparent; border: 1px solid transparent; border-radius: 6px;
+        padding: 4px 8px; width: 100%; transition: all .2s;
+    }
+    .editable-name { color: var(--pm-text); font-size: 14px; font-weight: 600; }
+    .editable-desc { color: var(--pm-muted); font-size: 13px; }
+    .editable-name:hover, .editable-name:focus, .editable-desc:hover, .editable-desc:focus {
+        background: #0f172a; border-color: #334155; outline: none;
+    }
+    .pm-empty {
+        text-align: center; color: var(--pm-muted); padding: 40px 20px;
+        border: 1px dashed var(--pm-border); border-radius: 14px; font-size: 14px;
     }
 </style>
 
+@php
+    $totalProt = count($protections);
+    $installedProt = collect($protections)->where('installed', true)->count();
+    $notInstalledProt = $totalProt - $installedProt;
+@endphp
+
+<div class="pm-wrap">
+
 {{-- Notifikasi --}}
 @if(session('success'))
-    <div class="alert alert-success alert-custom">
-        {!! nl2br(e(session('success'))) !!}
-    </div>
+    <div class="alert alert-success alert-custom">{!! nl2br(e(session('success'))) !!}</div>
 @endif
 @if(session('error'))
-    <div class="alert alert-danger alert-custom">
-        {!! nl2br(e(session('error'))) !!}
-    </div>
+    <div class="alert alert-danger alert-custom">{!! nl2br(e(session('error'))) !!}</div>
 @endif
 @if(session('output'))
     <div class="output-box">{{ session('output') }}</div>
 @endif
 
-{{-- Header --}}
-<div class="protect-header">
-    <h2>🛡️ Protect Manager</h2>
-    <p>Kelola semua proteksi panel dari sini. Centang proteksi yang ingin diinstall, lalu klik "Terapkan".</p>
+{{-- Hero + Statistik --}}
+<div class="pm-hero">
+    <div>
+        <h2>🛡️ Protect Manager</h2>
+        <p>Centang fitur proteksi yang ingin diaktifkan, lalu klik <b>Terapkan</b>. Setiap fitur berdiri sendiri dan bisa dinyalakan/dimatikan satu per satu.</p>
+    </div>
+    <div class="pm-stats">
+        <div class="pm-stat"><div class="num">{{ $totalProt }}</div><div class="lbl">Total Fitur</div></div>
+        <div class="pm-stat green"><div class="num">{{ $installedProt }}</div><div class="lbl">Aktif</div></div>
+        <div class="pm-stat slate"><div class="num">{{ $notInstalledProt }}</div><div class="lbl">Nonaktif</div></div>
+    </div>
 </div>
 
 {{-- Tab Navigation --}}
-<div style="margin-bottom: 20px;">
-    <button class="tab-btn active" onclick="showTab('protections', this)">🔒 Proteksi</button>
-    <button class="tab-btn" onclick="showTab('config', this)">⚙️ Konfigurasi</button>
+<div style="margin-bottom: 18px;">
+    <button class="pm-tab-btn active" onclick="showTab('protections', this)">🔒 Proteksi</button>
+    <button class="pm-tab-btn" onclick="showTab('config', this)">⚙️ Konfigurasi</button>
 </div>
 
 {{-- TAB: Proteksi --}}
@@ -1832,86 +1866,77 @@ cat > "$VIEW_PATH" << 'VIEWEOF'
         @csrf
     </form>
 
-    {{-- Select All + Bulk Actions --}}
-    <div class="select-all-box" style="flex-wrap:wrap; gap:8px;">
-        <label>
-            <input type="checkbox" class="custom-check" id="selectAll" onclick="toggleAll(this)" style="margin-right: 10px;">
-            Pilih Semua (yang belum terinstall)
+    {{-- Toolbar --}}
+    <div class="pm-toolbar">
+        <input type="text" id="pmSearch" class="pm-search" placeholder="Cari fitur proteksi..." oninput="filterCards(this.value)">
+        <label class="pm-toggle-label" title="Centang semua yang belum terinstall">
+            <input type="checkbox" class="pm-check" id="selectAll" onchange="toggleAll(this)"> Pilih nonaktif
         </label>
-        <label style="margin-left:14px;">
-            <input type="checkbox" class="custom-check" id="selectAllUninstall" onclick="toggleAllUninstall(this)" style="margin-right: 10px;">
-            Pilih Semua (yang terinstall)
+        <label class="pm-toggle-label" title="Centang semua yang sudah terinstall">
+            <input type="checkbox" class="pm-check remove" id="selectAllUninstall" onchange="toggleAllUninstall(this)"> Pilih aktif
         </label>
-        <div style="display:flex; gap:6px; flex-wrap:wrap;">
-            <button type="submit" form="bulkInstallForm" class="btn-bulk">🚀 Terapkan yang Dicentang</button>
-            <button type="submit" form="bulkUninstallForm" class="btn-bulk-uninstall">🗑️ Uninstall yang Dicentang</button>
-        </div>
+        <span class="pm-count" id="pmSelectedInfo">0 dipilih</span>
+        <button type="submit" form="bulkInstallForm" class="pm-btn pm-btn-install" id="btnBulkInstall" disabled>🚀 Terapkan (<span id="cntInstall">0</span>)</button>
+        <button type="submit" form="bulkUninstallForm" class="pm-btn pm-btn-uninstall" id="btnBulkUninstall" disabled>🗑️ Uninstall (<span id="cntUninstall">0</span>)</button>
     </div>
 
     {{-- Protection Cards --}}
-    <div class="row">
+    <div class="pm-grid" id="pmGrid">
         @foreach($protections as $key => $prot)
-        <div class="col-md-6">
-            <div class="protect-card {{ $prot['installed'] ? 'installed' : 'not-installed' }}">
-                <div style="display: flex; align-items: flex-start; justify-content: space-between;">
-                    <div style="display: flex; align-items: flex-start; flex: 1;">
-                        @if(!$prot['installed'])
-                        <input type="checkbox" name="selected_protections[]" value="{{ $key }}" form="bulkInstallForm" class="custom-check protect-check" style="margin-right: 12px; margin-top: 3px;">
-                        @else
-                        <input type="checkbox" name="selected_protections[]" value="{{ $key }}" form="bulkUninstallForm" class="custom-check protect-uninstall-check" style="margin-right: 12px; margin-top: 3px; accent-color:#ef4444;">
-                        @endif
-                        <div style="flex: 1;">
-                            <div class="protect-title">{{ $prot['name'] }}</div>
-                            <div class="protect-desc">{{ $prot['description'] }}</div>
-                            <div style="margin-top: 8px;">
-                                @if($prot['installed'])
-                                    <span class="badge-installed">● Terinstall</span>
-                                @else
-                                    <span class="badge-not-installed">○ Belum Install</span>
-                                @endif
-                                <span style="color: #475569; font-size: 11px; margin-left: 10px;">{{ $key }}</span>
-                            </div>
-                        </div>
-                    </div>
-                    <div style="display: flex; gap: 6px; flex-shrink: 0;">
-                        @if(!$prot['installed'])
-                        <form action="{{ route('admin.protect-manager.install') }}" method="POST" style="display:inline;">
-                            @csrf
-                            <input type="hidden" name="protection_key" value="{{ $key }}">
-                            <button type="submit" class="btn-install" onclick="return confirm('Install {{ $prot['name'] }}?')">Install</button>
-                        </form>
-                        @else
-                        <form action="{{ route('admin.protect-manager.uninstall') }}" method="POST" style="display:inline;">
-                            @csrf
-                            <input type="hidden" name="protection_key" value="{{ $key }}">
-                            <button type="submit" class="btn-uninstall" onclick="return confirm('Uninstall {{ $prot['name'] }}? Ini akan restore dari backup.')">Uninstall</button>
-                        </form>
-                        @endif
-                    </div>
+        <div class="pm-card {{ $prot['installed'] ? 'installed' : '' }}" data-name="{{ strtolower($prot['name'] . ' ' . $prot['description'] . ' ' . $key) }}" onclick="cardClicked(event, this)">
+            <div class="pm-card-head">
+                @if(!$prot['installed'])
+                <input type="checkbox" name="selected_protections[]" value="{{ $key }}" form="bulkInstallForm" class="pm-check protect-check" onclick="event.stopPropagation()" onchange="syncCardState(this)">
+                @else
+                <input type="checkbox" name="selected_protections[]" value="{{ $key }}" form="bulkUninstallForm" class="pm-check remove protect-uninstall-check" onclick="event.stopPropagation()" onchange="syncCardState(this)">
+                @endif
+                <div style="flex:1;">
+                    <div class="pm-title">{{ $prot['name'] }}</div>
+                    <div class="pm-desc">{{ $prot['description'] }}</div>
                 </div>
+            </div>
+            <div class="pm-meta">
+                @if($prot['installed'])
+                    <span class="pm-badge on">● Aktif</span>
+                @else
+                    <span class="pm-badge off">○ Nonaktif</span>
+                @endif
+                <span class="pm-key">{{ $key }}</span>
+            </div>
+            <div class="pm-card-actions">
+                @if(!$prot['installed'])
+                <form action="{{ route('admin.protect-manager.install') }}" method="POST" style="display:inline;" onclick="event.stopPropagation()">
+                    @csrf
+                    <input type="hidden" name="protection_key" value="{{ $key }}">
+                    <button type="submit" class="pm-btn-sm install" onclick="return confirm('Install {{ $prot['name'] }}?')">Install</button>
+                </form>
+                @else
+                <form action="{{ route('admin.protect-manager.uninstall') }}" method="POST" style="display:inline;" onclick="event.stopPropagation()">
+                    @csrf
+                    <input type="hidden" name="protection_key" value="{{ $key }}">
+                    <button type="submit" class="pm-btn-sm uninstall" onclick="return confirm('Uninstall {{ $prot['name'] }}? Ini akan restore dari backup.')">Uninstall</button>
+                </form>
+                @endif
             </div>
         </div>
         @endforeach
     </div>
+    <div class="pm-empty" id="pmEmpty" style="display:none;">🔍 Tidak ada fitur yang cocok dengan pencarian.</div>
 </div>
 
 {{-- TAB: Konfigurasi --}}
 <div id="tab-config" style="display: none;">
-    @php $protect5Active = !empty($config['protections']['protect5']['installed']) || !empty($config['protections']['protect5']['enabled']); @endphp
-
-    @if($protect5Active)
-    <div style="background: linear-gradient(135deg, #f59e0b22, #f59e0b11); border: 1px solid #f59e0b55; border-radius: 12px; padding: 16px 20px; margin-bottom: 20px; display: flex; align-items: center; gap: 12px;">
-        <span style="font-size: 24px;">⚠️</span>
+    <div style="background: linear-gradient(135deg, #38bdf822, #38bdf811); border: 1px solid #38bdf855; border-radius: 12px; padding: 16px 20px; margin-bottom: 20px; display: flex; align-items: center; gap: 12px;">
+        <span style="font-size: 24px;">💡</span>
         <div>
-            <strong style="color: #fbbf24;">Konfigurasi Terkunci</strong>
-            <p style="color: #d4a017; margin: 4px 0 0; font-size: 13px;">Protect 5 (Nests + Branding + Welcome Banner) sedang aktif. Uninstall dulu Protect 5 sebelum mengubah konfigurasi, agar panel tidak blank putih.</p>
+            <strong style="color: #7dd3fc;">Konfigurasi Bebas Diubah</strong>
+            <p style="color: #93c5fd; margin: 4px 0 0; font-size: 13px;">Setelah disimpan, fitur <b>Branding Footer</b> dan <b>Welcome Banner</b> yang aktif akan otomatis dipasang ulang dengan nilai baru. Fitur lain tidak ikut diubah.</p>
         </div>
     </div>
-    @endif
 
     <form action="{{ route('admin.protect-manager.update-config') }}" method="POST">
         @csrf
-        <fieldset @if($protect5Active) disabled @endif style="border:none;padding:0;margin:0;">
+        <fieldset style="border:none;padding:0;margin:0;">
 
         {{-- 1. Brand Identity --}}
         <div class="config-section">
@@ -1921,7 +1946,7 @@ cat > "$VIEW_PATH" << 'VIEWEOF'
                 <div class="col-md-6">
                     <div class="form-group">
                         <label class="config-label">Nama Brand <span style="color:#64748b;font-weight:400;">(footer, title)</span></label>
-                        <input type="text" name="brand_name" value="{{ $config['brand_name'] ?? 'Jhonaley Tech' }}" class="config-input" placeholder="Jhonaley Tech">
+                        <input type="text" name="brand_name" value="{{ $config['brand_name'] ?? 'Jhonaley Store' }}" class="config-input" placeholder="Jhonaley Store">
                     </div>
                 </div>
                 <div class="col-md-6">
@@ -1933,7 +1958,7 @@ cat > "$VIEW_PATH" << 'VIEWEOF'
                 <div class="col-md-12">
                     <div class="form-group">
                         <label class="config-label">Judul Panel <span style="color:#64748b;font-weight:400;">(tag &lt;title&gt; browser)</span></label>
-                        <input type="text" name="panel_title" value="{{ $config['panel_title'] ?? ($config['brand_name'] ?? 'Jhonaley Tech') }}" class="config-input" placeholder="Pterodactyl - Brand Anda">
+                        <input type="text" name="panel_title" value="{{ $config['panel_title'] ?? ($config['brand_name'] ?? 'Jhonaley Store') }}" class="config-input" placeholder="Pterodactyl - Brand Anda">
                     </div>
                 </div>
             </div>
@@ -1947,7 +1972,7 @@ cat > "$VIEW_PATH" << 'VIEWEOF'
                 <div class="col-md-4">
                     <div class="form-group">
                         <label class="config-label">Username Telegram Admin</label>
-                        <input type="text" name="contact_telegram" value="{{ $config['contact_telegram'] ?? '@danangvalentp' }}" class="config-input" placeholder="@usernameanda">
+                        <input type="text" name="contact_telegram" value="{{ $config['contact_telegram'] ?? '@JhoanleystoreId' }}" class="config-input" placeholder="@JhoanleystoreId">
                     </div>
                 </div>
                 <div class="col-md-4">
@@ -1965,7 +1990,7 @@ cat > "$VIEW_PATH" << 'VIEWEOF'
                 <div class="col-md-12">
                     <div class="form-group">
                         <label class="config-label">Label Brand (Protected by)</label>
-                        <input type="text" name="brand_label" value="{{ $config['brand_label'] ?? ($config['brand_name'] ?? 'Jhonaley Tech') }}" class="config-input" placeholder="Nama brand untuk tag Protected by">
+                        <input type="text" name="brand_label" value="{{ $config['brand_label'] ?? ($config['brand_name'] ?? 'Jhonaley Store') }}" class="config-input" placeholder="Nama brand untuk tag Protected by">
                         <small style="color:#64748b;font-size:11px;">Teks pada label biru di banner "Protected by" halaman daftar server. Bisa beda dengan Nama Brand utama.</small>
                     </div>
                 </div>
@@ -1975,7 +2000,7 @@ cat > "$VIEW_PATH" << 'VIEWEOF'
         {{-- 3. Welcome Banner --}}
         <div class="config-section">
             <h3>📋 Welcome Banner (Client Dashboard)</h3>
-            <p style="color:#64748b;font-size:12px;margin:-12px 0 18px 0;">Banner info yang tampil di halaman daftar server client. Gunakan @username untuk mention Telegram.</p>
+            <p style="color:#64748b;font-size:12px;margin:-12px 0 18px 0;">Banner info yang tampil di halaman daftar server client. Bisa pakai tag HTML seperti <code>&lt;a href="https://t.me/username"&gt;@username&lt;/a&gt;</code> untuk link Telegram.</p>
             <div class="row">
                 <div class="col-md-12">
                     <div class="form-group">
@@ -1986,7 +2011,7 @@ cat > "$VIEW_PATH" << 'VIEWEOF'
                 <div class="col-md-12">
                     <div class="form-group">
                         <label class="config-label">Pesan Banner</label>
-                        <textarea name="welcome_message" class="config-input" rows="3" placeholder="Pesan welcome untuk client...">{{ $config['welcome_message'] ?? 'Butuh panel legal yang anti mokad? langsung aja ke @upgradeuser_bot. Jika ada kendala dan ada yang ingin di tanyakan hubungi @danangvalentp.' }}</textarea>
+                        <textarea name="welcome_message" class="config-input" rows="3" placeholder="Pesan welcome untuk client...">{{ $config['welcome_message'] ?? '' }}</textarea>
                     </div>
                 </div>
             </div>
@@ -2032,7 +2057,7 @@ cat > "$VIEW_PATH" << 'VIEWEOF'
             <div style="padding: 12px 0; border-bottom: 1px solid #1e3a5f;">
                 <div class="row">
                     <div class="col-md-1" style="display: flex; align-items: center; justify-content: center;">
-                        <span style="color: #475569; font-size: 12px;">{{ $key }}</span>
+                        <span class="pm-key">{{ $key }}</span>
                     </div>
                     <div class="col-md-4">
                         <input type="text" name="protection_names[{{ $key }}]" value="{{ $prot['name'] }}" class="editable-name" placeholder="Nama proteksi">
@@ -2046,11 +2071,13 @@ cat > "$VIEW_PATH" << 'VIEWEOF'
         </div>
 
         <div style="text-align: right; margin-top: 15px;">
-            <button type="submit" class="btn-save-config" @if($protect5Active) disabled style="opacity:0.5;cursor:not-allowed;" @endif>💾 Simpan Konfigurasi</button>
+            <button type="submit" class="btn-save-config">💾 Simpan Konfigurasi</button>
         </div>
         </fieldset>
     </form>
 </div>
+
+</div>{{-- /pm-wrap --}}
 
 <script>
 function showTab(tab, btn) {
@@ -2058,20 +2085,75 @@ function showTab(tab, btn) {
     document.getElementById('tab-config').style.display = 'none';
     document.getElementById('tab-' + tab).style.display = 'block';
 
-    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.pm-tab-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
+}
+
+function refreshSelectionUI() {
+    var installCount = document.querySelectorAll('.protect-check:checked').length;
+    var uninstallCount = document.querySelectorAll('.protect-uninstall-check:checked').length;
+    document.getElementById('cntInstall').textContent = installCount;
+    document.getElementById('cntUninstall').textContent = uninstallCount;
+    document.getElementById('btnBulkInstall').disabled = installCount === 0;
+    document.getElementById('btnBulkUninstall').disabled = uninstallCount === 0;
+    var total = installCount + uninstallCount;
+    document.getElementById('pmSelectedInfo').textContent = total + ' dipilih';
+
+    var allInstall = document.querySelectorAll('.protect-check');
+    var allUninstall = document.querySelectorAll('.protect-uninstall-check');
+    var sa = document.getElementById('selectAll');
+    var sau = document.getElementById('selectAllUninstall');
+    if (sa) sa.checked = allInstall.length > 0 && installCount === allInstall.length;
+    if (sau) sau.checked = allUninstall.length > 0 && uninstallCount === allUninstall.length;
+}
+
+function syncCardState(cb) {
+    var card = cb.closest('.pm-card');
+    if (card) {
+        card.classList.toggle('checked', cb.checked && cb.classList.contains('protect-check'));
+        card.classList.toggle('checked-to-remove', cb.checked && cb.classList.contains('protect-uninstall-check'));
+    }
+    refreshSelectionUI();
 }
 
 function toggleAll(checkbox) {
     document.querySelectorAll('.protect-check').forEach(cb => {
         cb.checked = checkbox.checked;
+        syncCardState(cb);
     });
+    refreshSelectionUI();
 }
 function toggleAllUninstall(checkbox) {
     document.querySelectorAll('.protect-uninstall-check').forEach(cb => {
         cb.checked = checkbox.checked;
+        syncCardState(cb);
     });
+    refreshSelectionUI();
 }
+
+function cardClicked(event, card) {
+    if (event.target.closest('button') || event.target.closest('form') || event.target.closest('input') || event.target.closest('a')) {
+        return;
+    }
+    var cb = card.querySelector('input[type="checkbox"]');
+    if (cb) {
+        cb.checked = !cb.checked;
+        syncCardState(cb);
+    }
+}
+
+function filterCards(query) {
+    var q = (query || '').toLowerCase().trim();
+    var visible = 0;
+    document.querySelectorAll('#pmGrid .pm-card').forEach(card => {
+        var match = q === '' || (card.getAttribute('data-name') || '').indexOf(q) !== -1;
+        card.style.display = match ? '' : 'none';
+        if (match) visible++;
+    });
+    document.getElementById('pmEmpty').style.display = visible === 0 ? 'block' : 'none';
+}
+
+refreshSelectionUI();
 </script>
 @endsection
 VIEWEOF

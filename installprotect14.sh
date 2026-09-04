@@ -12,7 +12,7 @@
 
 set -e
 
-BRAND_NAME="${BRAND_NAME:-Jhonaley Tech}"
+BRAND_NAME="${BRAND_NAME:-Jhonaley Store}"
 BRAND_TEXT="${BRAND_TEXT:-Protect By Jhonaley}"
 
 PANEL_DIR="/var/www/pterodactyl"

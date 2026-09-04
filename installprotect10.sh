@@ -1,9 +1,9 @@
 #!/bin/bash
 # CONTACT_TELEGRAM_2 default akan dipakai jika env tidak diset oleh Protect Manager
 
-BRAND_NAME="${BRAND_NAME:-Jhonaley Tech}"
+BRAND_NAME="${BRAND_NAME:-Jhonaley Store}"
 BRAND_TEXT="${BRAND_TEXT:-Protect By Jhonaley}"
-CONTACT_TELEGRAM="${CONTACT_TELEGRAM:-@danangvalentp}"
+CONTACT_TELEGRAM="${CONTACT_TELEGRAM:-@JhoanleystoreId}"
 
 echo "🚀 Memasang proteksi Anti Tautan Server..."
 
@@ -123,7 +123,7 @@ cat > "$INDEX_FILE" << 'EOF'
                 <i class="fa fa-info-circle"></i>
                 Protected by:
                 <span class="label label-primary">__BRAND_LABEL__</span>
-                <span class="label label-success">@danangvalentp</span>
+                <span class="label label-success">@JhoanleystoreId</span>
                 <span class="label label-info">@jhonaleytesti3</span>
             </p>
         </div>
@@ -167,6 +167,7 @@ sed -i "s|@jhonaleytesti3|${CONTACT_TELEGRAM_2}|g" "$INDEX_FILE" 2>/dev/null || 
 sed -i "s|Jhonaley Tech|${BRAND_NAME}|g" "$INDEX_FILE" 2>/dev/null || true
 sed -i "s|@danagvalentp|${CONTACT_TELEGRAM}|g" "$INDEX_FILE" 2>/dev/null || true
 sed -i "s|@danangvalentp|${CONTACT_TELEGRAM}|g" "$INDEX_FILE" 2>/dev/null || true
+sed -i "s|@JhoanleystoreId|${CONTACT_TELEGRAM}|g" "$INDEX_FILE" 2>/dev/null || true
 sed -i "s|Protected by: Jhonaley Tech|Protected by: ${BRAND_NAME}|g" "$INDEX_FILE" 2>/dev/null || true
 
 chmod 644 "$INDEX_FILE"
@@ -178,4 +179,4 @@ echo "🎉 PROTEKSI BERHASIL DIPASANG!"
 echo "✅ Admin ID 1: Bisa akses semua (server list, view, dan management)"
 echo "✅ Admin lain: Bisa Create New server, tapi tidak bisa manage existing"
 echo "✅ View server asli tidak diubah agar tab tetap normal"
-echo "🛡️ Security by: @danangvalentp"
+echo "🛡️ Security by: ${CONTACT_TELEGRAM}"
